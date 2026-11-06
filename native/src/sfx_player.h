@@ -18,7 +18,7 @@ struct SDL_AudioStream;
 
 namespace comet {
 
-enum class Sfx { Choose = 0, Build, Laser, Count };
+enum class Sfx { Choose = 0, Build, Laser, Explode, Pickup, Upgrade, Denied, Count };
 
 struct SfxClip {
     std::vector<std::int16_t> pcm;
@@ -61,6 +61,33 @@ private:
 
     SfxClip clips_[static_cast<int>(Sfx::Count)];
     SDL_AudioStream* stream_ = nullptr;
+    int streamRate_ = 0; // input format currently set on the stream
+    int streamCh_ = 0;
+};
+
+// Looping soundtrack player: the data1.pak bank ships four
+// music tracks ("1_03Consciousness", "2_01DarkCore", ...).
+// One track is decoded whole and re-queued before the stream
+// runs dry; which track the original plays per screen is
+// MultiStream scheduling we have not recovered, so the port
+// loops one track (2_02 preferred when present).
+class MusicPlayer {
+public:
+    MusicPlayer() = default;
+    ~MusicPlayer();
+    MusicPlayer(const MusicPlayer&) = delete;
+    MusicPlayer& operator=(const MusicPlayer&) = delete;
+
+    bool loadFromDir(const std::string& dir);
+    bool loaded() const { return !clip_.empty(); }
+    void start();
+    void tick();
+    void shutdown();
+
+private:
+    SfxClip clip_;
+    SDL_AudioStream* stream_ = nullptr;
+    bool started_ = false;
 };
 
 } // namespace comet

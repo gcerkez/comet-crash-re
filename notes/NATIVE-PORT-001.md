@@ -288,6 +288,23 @@ thread's tail; FUN_00124e80 is the OBJ loader. HUD
 functions and the state machine are mapped in notes 026;
 porting the original HUD layout is the next slice.
 
+## Milestone 18 — full sound bank + soundtrack (2026-11-06)
+
+The SFX player now loads the complete data1.pak library
+by semantic name (turret_shot, money_pickup,
+range_upgrade, out_of_money, EXPLOSION_LARGE,
+build_sound, menu_choose), with the data2 bank as a
+second scan directory (COMET_SFX_DIR2) filling empty
+slots. The bank mixes sample rates and channel counts,
+so the stream converts per clip (fixed stereo 44.1k
+output, per-clip input format). Rock smashes report
+fxPickup and play the money-pickup sound. A MusicPlayer
+loops the soundtrack (2_02Subversion preferred) on its
+own stream at 0.4 gain; whole-track decode costs ~90 MB
+RAM for the long track — acceptable on desktop, noted.
+Which track plays per screen in the original is
+MultiStream scheduling, not yet recovered.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

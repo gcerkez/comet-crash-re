@@ -158,6 +158,7 @@ void ArenaSim::reset(const LevelData* level) {
     spawnCounter_ = 0;
     fxLaser = 0;
     fxBuild = 0;
+    fxPickup = 0;
 }
 
 namespace {
@@ -654,6 +655,7 @@ void ArenaSim::update(const input::InputFrame& in, float dt) {
                     ++kills;
                     if (e.kind == 90 && s.fromPlayer) {
                         thorium = std::min(thoriumMax, thorium + e.value);
+                        ++fxPickup; // rock smashed: shell plays the pickup sound
                     }
                     ++fxLaser;
                 }

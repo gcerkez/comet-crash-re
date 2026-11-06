@@ -1196,6 +1196,15 @@ int main(int argc, char** argv) {
             }
         }
     }
+    if (const char* sfxDir2 = SDL_getenv("COMET_SFX_DIR2")) {
+        sfx.loadFromDir(sfxDir2); // second bank fills empty slots
+    }
+    comet::MusicPlayer music;
+    if (const char* sfxDir = SDL_getenv("COMET_SFX_DIR")) {
+        if (music.loadFromDir(sfxDir)) {
+            music.start();
+        }
+    }
     bool running = true;
     long frameNo = 0;
     Uint64 lastTicks = SDL_GetTicks();
@@ -1278,7 +1287,12 @@ int main(int argc, char** argv) {
                 sfx.play(comet::Sfx::Build);
                 sim.fxBuild = 0;
             }
+            if (sim.fxPickup > 0) {
+                sfx.play(comet::Sfx::Pickup);
+                sim.fxPickup = 0;
+            }
         }
+        music.tick();
 
         // One-shot SFX (MultiStream's job on PS3): the bank's own
         // item-choose click on menu confirms, its build sound on
@@ -1368,6 +1382,7 @@ int main(int argc, char** argv) {
         SDL_Delay(16);
     }
 
+    music.shutdown();
     sfx.shutdown(); // before SDL_Quit: the stream must not outlive it
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

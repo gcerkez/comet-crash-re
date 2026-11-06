@@ -111,6 +111,7 @@ public:
 
     int fxLaser = 0;
     int fxBuild = 0;
+    int fxPickup = 0;
 
 private:
     std::vector<LevelData::Record24> events_;
