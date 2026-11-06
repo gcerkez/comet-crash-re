@@ -226,8 +226,10 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
     // Ground extent from the level header (fields 3/4 are the large
     // round numbers), clamped to a sane scene size.
     float extent = 10.0f;
-    if (level != nullptr && level->header[3] >= 100 && level->header[3] <= 4000) {
-        extent = (float)level->header[3] / 100.0f;
+    if (level != nullptr) {
+        // The arena is extent x extent cells (from the level's
+        // type-0x0B marker; 24 when the level has none).
+        extent = (float)level->extent * 0.5f;
     }
     // Ground plane (two translucent triangles) + grid lines.
     {

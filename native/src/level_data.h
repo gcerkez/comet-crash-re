@@ -33,16 +33,28 @@ struct LevelData {
 
     struct Record56 {
         std::uint8_t type = 0;
+        std::uint8_t b1 = 0, b2 = 0, b3 = 0; // @1..3; for type 0x0B, b2/b3 carry the extent
         float quat[4] = {0, 0, 0, 0};
         std::uint32_t field = 0;
     };
     struct Record24 {
         float value = 0.0f;
-        std::uint8_t bytes[4] = {0, 0, 0, 0}; // @4..7; type @6, subtype @7
+        std::uint8_t bytes[4] = {0, 0, 0, 0}; // @4..7; selector @6, opcode @7
     };
 
     std::vector<Record56> records56;
     std::vector<Record24> records24;
+
+    // Derived by level_parse: the type-0x0B record is the arena
+    // extent marker — extent = max(b2, b3), defaulting to 24 when
+    // no marker exists (the runtime writes it to state +0xA8/+0xAC).
+    // `events` is the filtered secondary list: a record is kept
+    // when selector (@6) <= 10 and (selector is 9/10 ? opcode (@7)
+    // != 29 : opcode in 20..30 and != 29); the section is consumed
+    // only when an extent marker exists.
+    std::uint32_t extent = 24;
+    bool hasExtentMarker = false;
+    std::vector<Record24> events;
 
     std::uint32_t count56() const { return header[0]; }
     std::uint32_t count24() const { return header[1]; }

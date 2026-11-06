@@ -41,6 +41,9 @@ bool LevelData::loadFromBuffer(const std::uint8_t* data, std::size_t size) {
     for (std::size_t i = 0; i < c56; ++i, p += 56) {
         Record56 r;
         r.type = p[0];
+        r.b1 = p[1];
+        r.b2 = p[2];
+        r.b3 = p[3];
         for (int k = 0; k < 4; ++k) {
             r.quat[k] = readBEFloat(p + 4 + k * 4);
         }
@@ -54,6 +57,35 @@ bool LevelData::loadFromBuffer(const std::uint8_t* data, std::size_t size) {
             r.bytes[k] = p[4 + k];
         }
         records24.push_back(r);
+    }
+    // Derive the arena extent from the type-0x0B marker record and
+    // filter the secondary records into the event list, mirroring
+    // level_parse (the secondary section is consumed only when a
+    // marker exists).
+    extent = 24;
+    hasExtentMarker = false;
+    for (const Record56& r : records56) {
+        if (r.type == 0x0B) {
+            hasExtentMarker = true;
+            extent = r.b2 > r.b3 ? r.b2 : r.b3;
+            break;
+        }
+    }
+    events.clear();
+    if (hasExtentMarker) {
+        for (const Record24& r : records24) {
+            const std::uint8_t selector = r.bytes[2];
+            const std::uint8_t opcode = r.bytes[3];
+            if (selector > 10) {
+                continue;
+            }
+            const bool keep = (selector == 9 || selector == 10)
+                                  ? (opcode != 29)
+                                  : (opcode >= 20 && opcode <= 30 && opcode != 29);
+            if (keep) {
+                events.push_back(r);
+            }
+        }
     }
     return true;
 }

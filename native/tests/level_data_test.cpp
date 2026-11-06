@@ -42,7 +42,10 @@ void padTo(std::vector<std::uint8_t>& buf, std::size_t n) {
 
 } // namespace
 
+namespace { int eventChecks(); }
+
 int main() {
+    failures += eventChecks();
     std::vector<std::uint8_t> img;
     putBE32(img, 2); // count56
     putBE32(img, 1); // count24
@@ -98,3 +101,33 @@ int main() {
     std::fprintf(stderr, "level_data_test: %d failure(s)\n", failures);
     return 1;
 }
+
+namespace {
+// Extent marker + secondary filter checks, mirroring level_parse.
+int eventChecks() {
+    int f = 0;
+    auto expect = [&f](bool cond, const char* what) {
+        if (!cond) { std::fprintf(stderr, "FAIL: %s\n", what); ++f; }
+    };
+    std::vector<unsigned char> buf(136 + 56 + 24 * 5, 0);
+    auto put32 = [&buf](std::size_t off, std::uint32_t v) {
+        buf[off] = (unsigned char)(v >> 24); buf[off + 1] = (unsigned char)(v >> 16);
+        buf[off + 2] = (unsigned char)(v >> 8); buf[off + 3] = (unsigned char)v;
+    };
+    put32(0, 1);
+    put32(4, 5);
+    unsigned char* rec = buf.data() + 136;
+    rec[0] = 0x0B; rec[2] = 16; rec[3] = 20;
+    unsigned char* sec = rec + 56;
+    const std::uint8_t cases[5][2] = {{9, 29}, {9, 21}, {1, 35}, {1, 25}, {11, 21}};
+    for (int i = 0; i < 5; ++i) {
+        unsigned char* r = sec + i * 24;
+        r[6] = cases[i][0]; r[7] = cases[i][1];
+    }
+    comet::LevelData lv;
+    expect(lv.loadFromBuffer(buf.data(), buf.size()), "events buffer parses");
+    expect(lv.hasExtentMarker && lv.extent == 20, "extent is max(b2,b3)=20");
+    expect(lv.events.size() == 2, "filter keeps exactly 2 of 5");
+    return f;
+}
+} // namespace
