@@ -66,12 +66,17 @@ will re-implement function-by-function.
 The game ships compiled Cg shader binaries (`data/ps3/*.fpo/.vpo`,
 RSX vertex/fragment programs). References for the port:
 
-- The **PS3 OpenGraphics Toolkit** (open-source alternative to
-  Nvidia's proprietary Cg toolkit for PS3) — the community route to
-  producing/understanding RSX shader binaries without the
-  proprietary toolkit. (The announcement thread itself blocked
-  automated reading — 403, plus a spam mirror — so only its stated
-  purpose is relied on here.)
+- The **PS3 OpenGraphics Toolkit** (by Cruslan,
+  github.com/Cruslan/PS3-OpenGraphics-Toolkit) — an open-source
+  replacement for Nvidia's proprietary Cg compiler binaries for
+  the RSX. Two of its tools matter here: **rsxcomp** compiles
+  SPIR-V/GLSL into .vpo/.fpo microcode, and **rsxdeasm** goes the
+  other way — it disassembles compiled .vpo/.fpo binaries back
+  into readable ARB-style assembly. That makes the game's 52
+  shipped shader binaries directly readable instead of
+  replace-by-role only. (The announcement thread names no
+  specific license — "free and open-source" only — and does not
+  mention PSGL; its stated target is the Cg toolkit itself.)
 - **RSXGL** (Phoronix, 2012): an OpenGL 3.1 implementation for the
   RSX built on nouveau reverse engineering + Mesa GLSL compilation —
   evidence the RSX program model maps cleanly onto desktop GLSL.
