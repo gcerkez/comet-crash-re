@@ -273,6 +273,21 @@ until the scene draw is ported. Corpus-side, the PSGL
 layer is named (255 readable call sites) and the
 arenaGraphics module is mapped (notes 023).
 
+## Milestone 17 — the camera from the code (2026-11-06)
+
+The Antigravity/Gemini Pro second opinion, cross-checked
+claim by claim against the ELF (notes 026), solved the
+camera: tilt 50 degrees (constant 0.872665 at 0x1F6014),
+overview distance 18 / ship-follow distance 11, centre
+(12,12) in grid-cell units, zoom 0-0.2 with scale
+1/(1-zoom). makeCamera now builds the view from those
+constants (eye along (0, sin50, cos50), ortho scale
+fitting the foreshortened field). The same pass corrected
+notes 025: the "transform pass" is the model preloader
+thread's tail; FUN_00124e80 is the OBJ loader. HUD
+functions and the state machine are mapped in notes 026;
+porting the original HUD layout is the next slice.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

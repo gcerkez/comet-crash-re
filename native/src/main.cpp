@@ -361,22 +361,24 @@ struct Camera {
 Camera makeCamera(float W, float H, float halfExtent) {
     const float S = halfExtent * 2.0f;
     Camera c;
-    // The projection TYPE is now code-true (notes 024): the
-    // corpus's only projection setups are orthographic - the
-    // game has no perspective camera. c.focal is therefore a
-    // uniform pixels-per-world-unit scale, chosen so the
-    // field centre frames as before. The eye position and
-    // tilt are still the labelled estimate; the original's
-    // modelview rotation lives in its scene draw, not yet
-    // ported.
-    c.eye = {0.0f, S * 1.06f, halfExtent + S * 0.20f};
-    const Vec3f target{0.0f, 0.0f, -S * 0.02f};
+    // The projection is code-true (notes 024): orthographic
+    // only. The view parameters are now also the game's own
+    // (notes 026, verified against the ELF): tilt
+    // 0.872665 rad = 50 degrees (constant at 0x1F6014),
+    // overview distance 18.0 (0x1F607C; ship-follow uses
+    // 11.0, 0x1F6080), default centre (12,12) on the grid
+    // (0x1F5FFC) - the game's world unit is the cell. Under
+    // ortho only the eye DIRECTION matters: the eye sits
+    // along (0, sin50, cos50) from the field centre. The
+    // scale fits the field's foreshortened depth span
+    // (S * sin50) into the frame height.
+    const float kTilt = 0.872665f; // 50 degrees, code-true
+    const Vec3f target{0.0f, 0.0f, 0.0f};
+    c.eye = {0.0f, S * std::sin(kTilt), S * std::cos(kTilt)};
     c.fwd = vnorm(vsub(target, c.eye));
     c.right = vnorm(vcross(c.fwd, {0, 1, 0}));
     c.up = vcross(c.right, c.fwd);
-    const Vec3f dv = vsub(target, c.eye);
-    const float distC = std::sqrt(vdot(dv, dv));
-    c.focal = ((H * 0.5f) / std::tan(0.35f)) / distC;
+    c.focal = (H * 0.94f) / (S * std::sin(kTilt));
     (void)W;
     return c;
 }
