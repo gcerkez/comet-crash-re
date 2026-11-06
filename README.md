@@ -45,7 +45,7 @@ game binary itself.**
 - ✅ Import map decoded from `.lib.stub`: 20 libraries, 195 functions (incl. input = `sys_io`, 6 functions)
 - ✅ Native host milestone 1: builds and runs — SDL3 window, unified keyboard/mouse + hot-plug gamepad input, unit-tested mapper
 - ✅ Startup chain walked: _entry → crt_startup → **main** (0xDAE30), all named in Ghidra; 77 import thunks renamed to SDK names (notes/RECONSTRUCTION-003.md)
-- ✅ FNID pass: **134/195 imports named** and labeled in Ghidra; corpus v2 exported (notes/RECONSTRUCTION-002.md)
+- ✅ FNID pass: **170/195 imports named** and labeled in Ghidra (cellGcmSys/cellSpurs/cellResc complete via RPCS3's HLE tables); corpus exported (notes/RECONSTRUCTION-002.md, RECONSTRUCTION-008.md)
 - ✅ Input seam named: `pads_update` (0x111278) → `pads_sample` (0x110738, per-frame cellPadGetData); original proven pad-only — no built-in keyboard/mouse
 - ✅ Module map v1: corpus split into per-module files under decompiled/by-module/ (MultiStream 66, PSGL 21, local_text 9, C runtime 17, rest unassigned)
 - ✅ Language tables extracted: 265 English strings incl. all menu text (analysis/language/)
@@ -53,6 +53,7 @@ game binary itself.**
 - ✅ Frame chain named (main → game_run → game_loop → frame_input → pads_update)
 - ✅ Native host plays the game's own SFX (extracted MP3 bank via minimp3 + SDL audio)
 - ✅ Native host renders the game's own OBJ models in a projected 3D arena scene (COMET_MODEL; notes/RECONSTRUCTION-007.md)
+- ✅ The render chain is traced to the present step: game_loop → render step → frame_present (cellResc convert+flip) → gcm_flip (notes/RECONSTRUCTION-008.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target
