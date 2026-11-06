@@ -189,6 +189,14 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   builds funded towers (Thorium, occupancy check, build timer).
   Model and audit trail: notes/RECONSTRUCTION-011.md.
 
+## Milestone 9 — mission setup
+
+- Settlement follows the recovered rule (record level raw[1] vs
+  per-kind initial level); script events run timed construction;
+  factories (kinds 26/28) stockpile pending units and deploy on
+  the recovered per-kind release intervals. Details and sources:
+  notes/RECONSTRUCTION-012.md.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

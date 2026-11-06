@@ -9,9 +9,14 @@
 //     type 9 = rock, types 20..28 = structures (dormant until the
 //     level's script activates them), 0x0B = the extent marker;
 //   * SECONDARY records are the level's timed script: when an
-//     event's time key passes, it activates a dormant structure of
-//     the matching kind (opcode). Factories then produce ground
-//     units; towers fire on their own;
+//     event's time key passes, it starts construction of a
+//     dormant structure of the matching kind (opcode), which
+//     completes on a build timer. Pre-placed structures whose
+//     record level (raw[1]) is at or below their kind's initial
+//     level settle active at mission start (recovered table:
+//     kinds 20-24 -> 1, 26 -> 2, 25/28 -> 5). Factories are kinds
+//     26/28: they stockpile pending units and deploy them on the
+//     recovered per-kind release intervals.
 //   * the player flies the ship, builds towers with Thorium
 //     (construction is a funded request with a build timer, per
 //     the recovered construction flow), and defends the base edge.
@@ -52,6 +57,9 @@ struct SimStructure {
     int hp = 3;
     float timer = 0.0f;   // build / production clock
     bool rock = false;
+    int pending = 0;      // produced units awaiting deployment
+    float deployTimer = 0.0f;
+    int producedKind = 40; // next unit kind to deploy (40..47)
 };
 
 class ArenaSim {

@@ -22,9 +22,33 @@ float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Kinds that produce ground units once active (v1: 24; the
-// original's factory family — see the branch recovery docs).
-bool isFactory(int kind) { return kind == 24; }
+// Factories are kinds 26 and 28 (the branch recovery's factory
+// commands pair selectors 4..8 with exactly those types).
+bool isFactory(int kind) { return kind == 26 || kind == 28; }
+
+bool isStructureKind(int kind) {
+    return (kind >= 20 && kind <= 26) || kind == 28;
+}
+
+// The original's per-kind initial (upgrade) level, recovered from
+// its map post-constructor transition: a pre-placed structure
+// whose record level is at or below this settles at mission
+// start; above it, the site waits for construction.
+int initialLevel(int kind) {
+    if (kind == 25 || kind == 28) return 5;
+    if (kind == 26) return 2;
+    if (kind >= 20 && kind <= 24) return 1;
+    return 0; // not a structure kind
+}
+
+// Ground-unit deployment release intervals by produced kind
+// (recovered base-deployment timing table, full strength):
+// kinds 40..43 stream, 44/46 every 0.5 s, 45/47/48 every 1 s.
+float deployInterval(int kind) {
+    if (kind == 44 || kind == 46) return 0.5f;
+    if (kind == 45 || kind == 47 || kind == 48) return 1.0f;
+    return 0.05f;
+}
 
 int structureHp(int kind) { return kind >= 26 ? 6 : 4; }
 
@@ -56,7 +80,15 @@ void ArenaSim::reset(const LevelData* level) {
             s.y = (float)r.b3;
             s.kind = r.type;
             s.rock = (r.type == 9);
-            s.state = s.rock ? 2 : 0; // rocks just exist; structures start dormant
+            // Mission setup (recovered settlement rule): rocks and
+            // non-structure records just exist; a structure settles
+            // active iff its record level (raw[1]) is at or below
+            // its kind's initial level, else it starts dormant.
+            if (s.rock || !isStructureKind(r.type)) {
+                s.state = 2;
+            } else {
+                s.state = ((int)r.b1 <= initialLevel(r.type)) ? 2 : 0;
+            }
             s.owner = 0;
             s.hp = structureHp(r.type);
             structures.push_back(s);
@@ -101,8 +133,8 @@ void ArenaSim::fireShot(float x, float y, float dx, float dy, bool fromPlayer) {
 void ArenaSim::activateNextStructure(int kind) {
     for (SimStructure& s : structures) {
         if (!s.rock && s.owner == 0 && s.kind == kind && s.state == 0) {
-            s.state = 2;
-            s.timer = 0.0f;
+            s.state = 1; // construction starts; completes on its timer
+            s.timer = kBuildTime;
             return;
         }
     }
@@ -195,16 +227,31 @@ void ArenaSim::update(const input::InputFrame& in, float dt) {
             continue;
         }
         s.timer -= dt;
-        if (isFactory(s.kind) && s.timer <= 0.0f) {
-            s.timer = kFactoryInterval;
-            SimEntity e;
-            e.kind = 40; // ground unit kind family (40..47)
-            e.x = s.x;
-            e.y = s.y + (s.owner == 1 ? -1.0f : 1.0f);
-            e.speed = 0.9f;
-            e.hp = 2;
-            e.ground = true;
-            entities.push_back(e);
+        if (isFactory(s.kind)) {
+            // Production stockpiles pending orders; deployment
+            // releases them from the factory cell on the recovered
+            // per-kind intervals. (The original transports output
+            // to the owner's base first — not yet modeled.)
+            if (s.timer <= 0.0f) {
+                s.timer = kFactoryInterval;
+                if (s.pending < 8) {
+                    ++s.pending;
+                }
+            }
+            s.deployTimer -= dt;
+            if (s.pending > 0 && s.deployTimer <= 0.0f) {
+                s.deployTimer = deployInterval(s.producedKind);
+                --s.pending;
+                SimEntity e;
+                e.kind = s.producedKind;
+                s.producedKind = s.producedKind >= 47 ? 40 : s.producedKind + 1;
+                e.x = s.x + 0.5f;
+                e.y = s.y + (s.owner == 1 ? -0.5f : 1.5f);
+                e.speed = 0.9f;
+                e.hp = 2;
+                e.ground = true;
+                entities.push_back(e);
+            }
         } else if (!isFactory(s.kind) && s.timer <= 0.0f) {
             // Tower: fire at the nearest opposing target in range.
             float bestD2 = kTowerRange * kTowerRange;

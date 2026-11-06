@@ -1,8 +1,10 @@
 // arena_sim_test.cpp — drives the arena simulation headlessly
 // against the recovered model: primary records are placed content
-// at (raw[2], raw[3]); secondary events activate dormant
-// structures by kind; factories produce ground units; the player
-// builds funded towers that complete on a timer and fire.
+// at (raw[2], raw[3]); a pre-placed structure settles active iff
+// its record level (raw[1]) is at or below its kind's initial
+// level; secondary events start construction of dormant
+// structures by kind; factories (26/28) stockpile and deploy
+// ground units; the player builds funded towers.
 
 #include "../src/arena_sim.h"
 
@@ -28,10 +30,12 @@ void put32(std::vector<unsigned char>& buf, std::size_t off, std::uint32_t v) {
     buf[off + 3] = (unsigned char)v;
 }
 
-// Level fixture: extent 16. Primaries: extent marker, a rock at
-// (3,3), a dormant factory (kind 24) at (8,2), a dormant tower
-// (kind 21) at (5,2). Events: t=1 activate 24, t=2 activate 21,
-// t=3 kind 26 (no dormant match -> comet fallback).
+// Level fixture: extent 16. Primaries: extent marker; a rock at
+// (3,3); a factory (kind 26, record level 1 <= initial 2 -> settles
+// active) at (8,2); a tower (kind 21, record level 3 > initial 1 ->
+// dormant) at (5,2). Events: t=1 kind 24 (no site -> comet),
+// t=2 kind 21 (starts the tower's construction), t=3 kind 26
+// (already active -> comet).
 comet::LevelData makeLevel() {
     std::vector<unsigned char> buf(136 + 56 * 4 + 24 * 3, 0);
     put32(buf, 0, 4);
@@ -45,11 +49,13 @@ comet::LevelData makeLevel() {
     rock[2] = 3;
     rock[3] = 3;
     unsigned char* fac = rec + 112;
-    fac[0] = 24;
+    fac[0] = 26;
+    fac[1] = 1;
     fac[2] = 8;
     fac[3] = 2;
     unsigned char* tow = rec + 168;
     tow[0] = 21;
+    tow[1] = 3;
     tow[2] = 5;
     tow[3] = 2;
     unsigned char* sec = rec + 224;
@@ -90,28 +96,41 @@ int main() {
     sim.reset(&lv);
     check(sim.extentCells == 16.0f, "extent from marker");
     check(sim.structures.size() == 3, "3 placed records (marker skipped)");
-    const comet::SimStructure* fac = findKind(sim, 24);
+    const comet::SimStructure* fac = findKind(sim, 26);
     check(fac != nullptr && fac->x == 8.0f && fac->y == 2.0f,
           "factory placed at (raw[2], raw[3])");
-    check(fac != nullptr && fac->state == 0, "factory starts dormant");
+    check(fac != nullptr && fac->state == 2,
+          "settlement: record level 1 <= kind 26 initial 2 -> active");
+    check(findKind(sim, 21)->state == 0,
+          "settlement: record level 3 > kind 21 initial 1 -> dormant");
     check(sim.cellOccupied(3, 3), "rock cell occupied");
     check(!sim.cellOccupied(4, 4), "empty cell free");
 
     comet::input::InputFrame idle{};
     sim.update(idle, 0.5f);
-    check(findKind(sim, 24)->state == 0, "nothing activates before t=1");
-    sim.update(idle, 0.6f); // t=1.1
-    check(findKind(sim, 24)->state == 2, "event activates the factory");
-    check(findKind(sim, 21)->state == 0, "tower still dormant");
-
-    // The factory produces a ground unit on its interval.
-    bool produced = false;
-    for (int i = 0; i < 30 && !produced; ++i) {
-        sim.update(idle, 0.5f);
-        produced = !sim.entities.empty();
+    sim.update(idle, 0.6f); // t=1.1: kind-24 event, no site -> comet
+    bool cometSeen = false;
+    for (const comet::SimEntity& e : sim.entities) {
+        cometSeen = cometSeen || !e.ground;
     }
-    check(produced, "active factory produces a ground unit");
-    check(sim.entities[0].ground, "produced unit is a ground unit");
+    check(cometSeen, "unmatched event sends a comet");
+
+    sim.update(idle, 1.0f); // t=2.1: kind-21 event starts construction
+    check(findKind(sim, 21)->state == 1, "event starts tower construction");
+    for (int i = 0; i < 30 && findKind(sim, 21)->state != 2; ++i) {
+        sim.update(idle, 0.2f);
+    }
+    check(findKind(sim, 21)->state == 2, "construction completes on its timer");
+
+    // The settled factory stockpiles and deploys a ground unit.
+    bool deployed = false;
+    for (int i = 0; i < 40 && !deployed; ++i) {
+        sim.update(idle, 0.5f);
+        for (const comet::SimEntity& e : sim.entities) {
+            deployed = deployed || e.ground;
+        }
+    }
+    check(deployed, "factory deploys a ground unit from its stockpile");
 
     // Ship flight still answers the input vector.
     comet::input::InputFrame left{};
@@ -120,8 +139,7 @@ int main() {
     sim.update(left, 0.5f);
     check(sim.shipX < x0 - 3.0f, "ship flies with the input vector");
 
-    // Construction: funded request at the ship's cell, build timer,
-    // then an active player tower.
+    // Player construction: funded request, build timer, active tower.
     sim.shipX = 10.5f;
     sim.shipY = 12.5f;
     const int th0 = sim.thorium;
@@ -135,11 +153,11 @@ int main() {
             mine = &s;
         }
     }
-    check(mine != nullptr && mine->state == 1, "tower is building");
+    check(mine != nullptr && mine->state == 1, "player tower is building");
     for (int i = 0; i < 60 && mine->state != 2; ++i) {
         sim.update(idle, 0.1f);
     }
-    check(mine->state == 2, "tower completes after its build timer");
+    check(mine->state == 2, "player tower completes after its build timer");
 
     // Occupied cell refuses construction.
     sim.shipX = 3.5f;
