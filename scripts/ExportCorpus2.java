@@ -143,6 +143,7 @@ public class ExportCorpus2 extends GhidraScript {
         // good file with a header-only one — see RECONSTRUCTION-003.)
 
         if (args.length >= 2) {
+            ReferenceManager refMgr = currentProgram.getReferenceManager();
             try (BufferedWriter w = new BufferedWriter(new FileWriter(new File(outDir, "import_callers.tsv")));
                  BufferedReader r = new BufferedReader(new FileReader(new File(args[1])))) {
                 w.write("library\tname\tfnid\tslot\tcaller_function\n");

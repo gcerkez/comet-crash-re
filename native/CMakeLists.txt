@@ -25,7 +25,10 @@ add_executable(comet_native
   src/sdl_input.cpp
   src/text_table.cpp
   src/menu_model.cpp
-  src/level_data.cpp)
+  src/level_data.cpp
+  src/sfx_player.cpp
+  src/mp3_decode.cpp)
+target_include_directories(comet_native PRIVATE third_party/minimp3)
 target_link_libraries(comet_native PRIVATE SDL3::SDL3)
 if(MSVC)
   target_compile_options(comet_native PRIVATE /W4)

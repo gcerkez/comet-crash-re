@@ -129,6 +129,15 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   float pairs, flow-field-like). With `COMET_MAP=<level file>` the
   arena renders those vectors; unit-tested like the rest.
 
+## Milestone 4 — sound
+
+- The extracted SFX bank plays in the host: minimp3 (CC0, vendored)
+  decodes the MP3s; `native/src/sfx_player.*` queues one-shots on an
+  SDL audio stream (MultiStream's role). Menu Confirm plays the
+  bank's own item-choose click; arena taps play its build sound.
+  Point `COMET_SFX_DIR` at the extracted bank;
+  `COMET_SFX_SELFTEST=1` exercises decode + playback headlessly.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

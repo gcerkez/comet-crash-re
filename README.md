@@ -37,7 +37,7 @@ game binary itself.**
 ## Reconstruction progress
 
 - ✅ Binary decrypted and verified (PPC64 ELF, entry via OPD at 0x1F2B38)
-- ✅ Full auto-analysis + decompile: **843/843 functions, 0 failures**
+- ✅ Full auto-analysis + decompile: 843/843 functions, 0 failures; **867** after discovering a missed 33 KB module (notes/RECONSTRUCTION-005.md)
 - ✅ First-pass findings: leaked source files (`main.c`, `arenaGraphics.cpp`,
   `ObjectGroup.cpp`, `sound/engine.cpp`, `local_text.cpp`,
   `fontMapFormat.cpp`), the `gCometEnv` global, weapon/unit model taxonomy,
@@ -51,6 +51,7 @@ game binary itself.**
 - ✅ Language tables extracted: 265 English strings incl. all menu text (analysis/language/)
 - ✅ Data formats opened: `.pak` archive cracked + extracted (16 MP3 SFX, scripts/extract_pak.py); `.map` levels characterized (float sections incl. direction vectors) with the loader chain found (notes/RECONSTRUCTION-004.md)
 - ✅ Frame chain named (main → game_run → game_loop → frame_input → pads_update)
+- ✅ Native host plays the game's own SFX (extracted MP3 bank via minimp3 + SDL audio)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target

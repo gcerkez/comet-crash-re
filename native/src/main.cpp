@@ -26,6 +26,7 @@
 #include "level_data.h"
 #include "menu_model.h"
 #include "sdl_input.h"
+#include "sfx_player.h"
 #include "text_table.h"
 
 using namespace comet::input;
@@ -232,7 +233,7 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
 int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
@@ -264,6 +265,18 @@ int main(int argc, char** argv) {
         }
     }
     const comet::LevelData* levelArg = haveLevel ? &level : nullptr;
+    comet::SfxPlayer sfx;
+    if (const char* sfxDir = SDL_getenv("COMET_SFX_DIR")) {
+        const int n = sfx.loadFromDir(sfxDir);
+        if (logFrames) {
+            SDL_Log("COMET_SFX_DIR %s: %d clip(s) loaded", sfxDir, n);
+        }
+        if (SDL_getenv("COMET_SFX_SELFTEST") != nullptr) {
+            for (int i = 0; i < static_cast<int>(comet::Sfx::Count); ++i) {
+                sfx.play(static_cast<comet::Sfx>(i));
+            }
+        }
+    }
     bool running = true;
     long frameNo = 0;
     Uint64 lastTicks = SDL_GetTicks();
@@ -291,6 +304,17 @@ int main(int argc, char** argv) {
 
         model.update(frame, (float)winW, (float)winH);
         (void)model.takeAction();  // run-start hooks land with gameplay
+
+        // One-shot SFX (MultiStream's job on PS3): the bank's own
+        // item-choose click on menu confirms, its build sound on
+        // arena placement taps.
+        if ((frame.pressed & BtnConfirm) != 0) {
+            if (model.current().id == comet::ScreenId::Arena) {
+                sfx.play(comet::Sfx::Build);
+            } else {
+                sfx.play(comet::Sfx::Choose);
+            }
+        }
 
         SDL_SetRenderDrawColor(renderer, 8, 10, 16, 255);
         SDL_RenderClear(renderer);
@@ -350,6 +374,7 @@ int main(int argc, char** argv) {
         SDL_Delay(16);
     }
 
+    sfx.shutdown(); // before SDL_Quit: the stream must not outlive it
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
