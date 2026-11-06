@@ -47,3 +47,7 @@ f6990,op_dispatch
 11320,psgl_enable
 fcebc,arena_createRenderTargets
 fdf00,arena_postChain
+fc778,arena_setSceneView
+fc828,arena_drawFullscreenQuad
+133eb0,gui_setView
+fce34,arena_renderTargetFlag

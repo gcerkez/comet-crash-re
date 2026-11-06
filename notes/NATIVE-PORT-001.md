@@ -261,6 +261,18 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   functions — the asset registry's real consumers, and the
   route by which levels load per mode. Notes 020.
 
+## Milestone 16 — code-true projection (2026-11-06)
+
+The corpus proves the game only ever sets orthographic
+projections (four psgl_ortho sites, notes 024): one shared
+screen-space box glOrtho(0, W, 1.0, H, 0, 1) for menus,
+arena and HUD, with W/H in shared BSS display globals.
+The host's renderer now projects orthographically to
+match; the modelview tilt remains the labelled estimate
+until the scene draw is ported. Corpus-side, the PSGL
+layer is named (255 readable call sites) and the
+arenaGraphics module is mapped (notes 023).
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

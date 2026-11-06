@@ -361,16 +361,22 @@ struct Camera {
 Camera makeCamera(float W, float H, float halfExtent) {
     const float S = halfExtent * 2.0f;
     Camera c;
-    // Nearer and nearer top-down than the first pass: the
-    // original frames the whole comet with only a slight tilt.
-    // (The exact view comes from arenaGraphics in the corpus;
-    // this matches the shipped game's framing.)
+    // The projection TYPE is now code-true (notes 024): the
+    // corpus's only projection setups are orthographic - the
+    // game has no perspective camera. c.focal is therefore a
+    // uniform pixels-per-world-unit scale, chosen so the
+    // field centre frames as before. The eye position and
+    // tilt are still the labelled estimate; the original's
+    // modelview rotation lives in its scene draw, not yet
+    // ported.
     c.eye = {0.0f, S * 1.06f, halfExtent + S * 0.20f};
     const Vec3f target{0.0f, 0.0f, -S * 0.02f};
     c.fwd = vnorm(vsub(target, c.eye));
     c.right = vnorm(vcross(c.fwd, {0, 1, 0}));
     c.up = vcross(c.right, c.fwd);
-    c.focal = (H * 0.5f) / std::tan(0.35f); // ~40 deg vertical fov
+    const Vec3f dv = vsub(target, c.eye);
+    const float distC = std::sqrt(vdot(dv, dv));
+    c.focal = ((H * 0.5f) / std::tan(0.35f)) / distC;
     (void)W;
     return c;
 }
@@ -380,11 +386,13 @@ bool project(const Camera& c, float W, float H, Vec3f p, float& sx, float& sy,
              float& depth) {
     const Vec3f d = vsub(p, c.eye);
     depth = vdot(d, c.fwd);
-    if (depth < 0.5f) {
+    if (depth < -500.0f) {
         return false;
     }
-    sx = W * 0.5f + vdot(d, c.right) * c.focal / depth;
-    sy = H * 0.5f - vdot(d, c.up) * c.focal / depth;
+    // Orthographic (code-true, notes 024): no divide by
+    // depth - uniform scale at every distance.
+    sx = W * 0.5f + vdot(d, c.right) * c.focal;
+    sy = H * 0.5f - vdot(d, c.up) * c.focal;
     return true;
 }
 
