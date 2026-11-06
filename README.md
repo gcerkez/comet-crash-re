@@ -58,6 +58,7 @@ game binary itself.**
 - ✅ **The arena is playable**: native gameplay core (arena_sim) flies the ship on the level grid, spawns the level's own scheduled events, combat + base defense, HUD — verified headlessly on level61 (notes/RECONSTRUCTION-010.md)
 - ✅ Cross-resource audit done; **placement cracked** (primary records sit at raw[2]/raw[3]) and the recovered **construction model** implemented: dormant structures activated by the level script, factory production, funded player builds (notes/RECONSTRUCTION-011.md)
 - ✅ **Mission setup recovered** from the decomp resources: per-kind initial levels + the raw[1] settlement rule, factories = kinds 26/28 with stockpile-and-deploy production, script events as timed construction (notes/RECONSTRUCTION-012.md)
+- ✅ Kind identities mapped (20 Base … 28 Special Ops; units 40–47); **Thorium economy from meteors, ship health/destruction/reset, and the offensive win condition** implemented (notes/RECONSTRUCTION-013.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target

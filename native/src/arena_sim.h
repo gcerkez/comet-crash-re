@@ -40,6 +40,8 @@ struct SimEntity { // a moving unit (ground unit or comet)
     int hp = 1;
     bool alive = true;
     bool ground = true;
+    bool playerOwned = false; // marches up-field and scores
+    float vx = 0.0f;          // meteors (kind 90) drift sideways
 };
 
 struct SimShot {
@@ -85,6 +87,12 @@ public:
     std::vector<SimStructure> structures; // incl. rocks (kind 9)
 
     int thorium = 100;
+    int shipHealth = 100;
+    bool shipAlive = true;
+    float respawnTimer = 0.0f;
+    int deaths = 0;
+    int score = 0;      // your units that reached the enemy base
+    int winTarget = 25; // header[5] hypothesis (values 25/30/50)
     int buildKind = 21; // currently selected build (cycle with Alt)
     int baseHits = 0;
     int baseHitsLimit = 10;
@@ -99,6 +107,9 @@ private:
     std::vector<LevelData::Record24> events_;
     float fireCooldown_ = 0.0f;
     unsigned spawnCounter_ = 0;
+    float meteorTimer_ = 5.0f;
+    void spawnMeteor();
+    void destroyShip();
     void activateNextStructure(int kind);
     void fireShot(float x, float y, float dx, float dy, bool fromPlayer);
 };

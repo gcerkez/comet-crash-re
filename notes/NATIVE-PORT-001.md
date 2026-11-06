@@ -197,6 +197,14 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   the recovered per-kind release intervals. Details and sources:
   notes/RECONSTRUCTION-012.md.
 
+## Milestone 10 — damage, Thorium, and winning
+
+- Ship health with destruction and the recovered 2-second base
+  reset; meteors as the Thorium source; player Ops production
+  bands and the send-units-to-win stage condition, with starting
+  Thorium / win target read from header hypotheses. Sources and
+  the kind-identity map: notes/RECONSTRUCTION-013.md.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

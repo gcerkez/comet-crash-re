@@ -272,7 +272,7 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
         const bool piloted = (sim != nullptr);
         const float rot = piloted ? sim->shipYaw : (float)(t * 0.8);
         const float cs = std::cos(rot), sn = std::sin(rot);
-        const float scale = obj.radius > 0 ? (piloted ? 3.0f : 5.0f) / obj.radius : 1.0f;
+        const float scale = obj.radius > 0 ? (piloted ? 3.0f : 5.0f) / obj.radius * ((piloted && !sim->shipAlive) ? 0.0f : 1.0f) : 1.0f;
         const float shipWX = piloted ? (sim->shipX - sim->extentCells * 0.5f) : 0.0f;
         const float shipWZ = piloted ? (sim->shipY - sim->extentCells * 0.5f) : 0.0f;
         const Vec3f light = vnorm({0.5f, 0.8f, 0.3f});
@@ -476,9 +476,11 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
         if (sim != nullptr) {
             char buf[128];
             std::snprintf(buf, sizeof(buf),
-                          "TIME %d   UNITS %d   KILLS %d   BASE %d/%d   THORIUM %d   BUILD %d [SQUARE]",
+                          "TIME %d   UNITS %d   KILLS %d   BASE %d/%d   THORIUM %d   SHIP %d%%   SCORE %d/%d   BUILD %d [SQUARE]",
                           (int)sim->timeSec, (int)sim->entities.size(), sim->kills,
-                          sim->baseHits, sim->baseHitsLimit, sim->thorium, sim->buildKind);
+                          sim->baseHits, sim->baseHitsLimit, sim->thorium,
+                          sim->shipAlive ? sim->shipHealth : 0, sim->score,
+                          sim->winTarget, sim->buildKind);
             drawText(r, 18, 44.0f, 2.0f, 235, 235, 240, buf);
             if (sim->gameOver) {
                 drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 255, 90, 70, "BASE LOST");

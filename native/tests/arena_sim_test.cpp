@@ -40,6 +40,8 @@ comet::LevelData makeLevel() {
     std::vector<unsigned char> buf(136 + 56 * 4 + 24 * 3, 0);
     put32(buf, 0, 4);
     put32(buf, 4, 3);
+    put32(buf, 16, 300); // header[4]: starting Thorium (hypothesis)
+    put32(buf, 20, 1);   // header[5]: units-to-win (hypothesis)
     unsigned char* rec = buf.data() + 136;
     rec[0] = 0x0B;
     rec[2] = 16;
@@ -103,6 +105,8 @@ int main() {
           "settlement: record level 1 <= kind 26 initial 2 -> active");
     check(findKind(sim, 21)->state == 0,
           "settlement: record level 3 > kind 21 initial 1 -> dormant");
+    check(sim.thorium == 300, "starting Thorium from header[4]");
+    check(sim.winTarget == 1, "win target from header[5]");
     check(sim.cellOccupied(3, 3), "rock cell occupied");
     check(!sim.cellOccupied(4, 4), "empty cell free");
 
@@ -165,6 +169,80 @@ int main() {
     const int th1 = sim.thorium;
     sim.update(build, 0.05f);
     check(sim.thorium == th1, "no build on an occupied cell");
+
+    // Ship damage, destruction, and the 2-second reset.
+    {
+        comet::ArenaSim s2;
+        s2.reset(&lv);
+        // Activate the tower quickly via its script event, park the
+        // ship in range, and let it shoot.
+        s2.update(idle, 2.1f); // t=2.1: tower construction starts
+        for (int i = 0; i < 20 && findKind(s2, 21)->state != 2; ++i) {
+            s2.update(idle, 0.25f);
+        }
+        s2.shipX = 5.5f;
+        s2.shipY = 4.5f;
+        bool hurt = false;
+        for (int i = 0; i < 600 && !hurt; ++i) {
+            s2.update(idle, 0.02f); // fine steps: shots move 0.48/step
+            hurt = s2.shipHealth < 100;
+        }
+        check(hurt, "enemy tower fire damages the ship");
+        s2.shipHealth = 5;
+        bool died = false;
+        for (int i = 0; i < 600 && !died; ++i) {
+            s2.update(idle, 0.02f);
+            died = !s2.shipAlive;
+        }
+        check(died && s2.deaths == 1, "ship is destroyed at zero health");
+        for (int i = 0; i < 20 && !s2.shipAlive; ++i) {
+            s2.update(idle, 0.25f);
+        }
+        check(s2.shipAlive && s2.shipHealth == 100,
+              "ship resets at the base after the countdown");
+    }
+
+    // Offense: a player Basic Ops sends a unit to the enemy base
+    // and wins the stage (winTarget = 1 in this fixture).
+    {
+        comet::ArenaSim s3;
+        s3.reset(&lv);
+        s3.buildKind = 26;
+        s3.shipX = 10.5f;
+        s3.shipY = 12.5f;
+        comet::input::InputFrame b{};
+        b.pressed = comet::input::BtnConfirm;
+        s3.update(b, 0.05f);
+        bool won = false;
+        for (int i = 0; i < 400 && !won; ++i) {
+            s3.update(idle, 0.25f);
+            won = s3.cleared;
+        }
+        check(won && s3.score >= 1, "player unit reaches the enemy base and wins");
+    }
+
+    // Thorium: shooting down a meteor pays out.
+    {
+        comet::ArenaSim s4;
+        s4.reset(&lv);
+        const int thStart = s4.thorium;
+        bool paid = false;
+        for (int i = 0; i < 600 && !paid; ++i) {
+            // Park the ship on any meteor and fire point-blank.
+            for (const comet::SimEntity& e : s4.entities) {
+                if (e.kind == 90) {
+                    s4.shipX = e.x;
+                    s4.shipY = e.y;
+                }
+            }
+            comet::input::InputFrame f{};
+            f.buttons = comet::input::BtnAction;
+            f.aimY = -1.0f;
+            s4.update(f, 0.02f);
+            paid = s4.thorium > thStart;
+        }
+        check(paid, "downed meteor releases Thorium");
+    }
 
     if (failures == 0) {
         std::printf("arena_sim_test: all checks passed\n");
