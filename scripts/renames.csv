@@ -1,0 +1,15 @@
+# Evidence-based function renames (see notes/RECONSTRUCTION-003.md).
+# _entry was already created by BootWalk.java; it is listed for the record.
+10230,_entry
+# CRT glue: copies the argument arrays, runs the initializer table,
+# calls main(argc, argv, envp) and feeds its return to the exit path.
+10338,crt_startup
+# Called by crt_startup with the three startup arguments; its int
+# return becomes the process result. Contains the game's init,
+# including the cellPadInit call.
+dae30,main
+# Per-pad sampling: calls the cellPadGetData thunk plus pad helpers.
+110738,pads_sample
+# Per-frame input update: calls the cellPadGetInfo2 thunk (connection
+# state) and pads_sample.
+111278,pads_update

@@ -136,58 +136,11 @@ public class ExportCorpus2 extends GhidraScript {
         println("ExportCorpus2: decompiled ok=" + okCount + " failed=" + failCount);
 
 
-        // ---------- function_strings.tsv ----------
-        // Every defined string each function references (the clustering
-        // evidence for the module split), plus import_callers.tsv: which
-        // functions reference each import-table slot (args[1] = imports.tsv).
-        ReferenceManager refMgr = currentProgram.getReferenceManager();
-        try (BufferedWriter w = new BufferedWriter(new FileWriter(new File(outDir, "function_strings.tsv")))) {
-            w.write("function\tstring_address\tvalue\n");
-            FunctionIterator it = fm.getFunctions(true);
-            while (it.hasNext()) {
-                Function f = it.next();
-                java.util.TreeSet<String> seen = new java.util.TreeSet<>();
-                InstructionIterator iit = currentProgram.getListing().getInstructions(f.getBody(), true);
-                while (iit.hasNext()) {
-                    Instruction ins = iit.next();
-                    for (Reference ref : refMgr.getReferencesFrom(ins.getAddress())) {
-                        Address to = ref.getToAddress();
-                        // Direct string?
-                        Data d = currentProgram.getListing().getDataAt(to);
-                        String found = null;
-                        String foundAddr = null;
-                        if (d != null && d.getValue() instanceof String) {
-                            found = (String) d.getValue();
-                            foundAddr = to.toString();
-                        } else {
-                            // Two-level: TOC/pointer slot -> string. Read the
-                            // 32-bit big-endian pointer stored at the slot.
-                            try {
-                                int ptr = currentProgram.getMemory().getInt(to);
-                                if (ptr != 0) {
-                                    Address paddr = toAddr(ptr & 0xffffffffL);
-                                    Data d2 = currentProgram.getListing().getDataAt(paddr);
-                                    if (d2 != null && d2.getValue() instanceof String) {
-                                        found = (String) d2.getValue();
-                                        foundAddr = paddr.toString();
-                                    }
-                                }
-                            } catch (Exception e) {
-                                // not a readable slot; skip
-                            }
-                        }
-                        if (found != null) {
-                            String val = found.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
-                            String key = foundAddr + "\t" + val;
-                            if (seen.add(key)) {
-                                w.write(f.getEntryPoint().toString() + "\t" + key + "\n");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        println("ExportCorpus2: function_strings.tsv written");
+        // NOTE: no function_strings.tsv here on purpose. Ghidra's
+        // database has no references for this binary's TOC-based string
+        // traffic; that map is produced by scripts/toc_string_xrefs.py
+        // (Capstone) instead. (A Ghidra-side export once overwrote the
+        // good file with a header-only one — see RECONSTRUCTION-003.)
 
         if (args.length >= 2) {
             try (BufferedWriter w = new BufferedWriter(new FileWriter(new File(outDir, "import_callers.tsv")));
