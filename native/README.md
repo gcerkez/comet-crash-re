@@ -1,9 +1,13 @@
 # Comet Crash — native host
 
-The native C++ host the reconstruction grows into. Milestone 1 is the
+The native C++ host the reconstruction grows into. Milestone 1 was the
 shell: an SDL3 window and the **unified input layer** that replaces the
-PS3 original's `sys_io` (ioPad*) sampling — keyboard and mouse stand in
-for a controller, and a real gamepad works the moment it's plugged in.
+PS3 original's `sys_io` (cellPad*) sampling — keyboard and mouse stand
+in for a controller, and a real gamepad works the moment it's plugged
+in. **Milestone 2 adds the game's menus**: the original's screens, order
+and strings, navigable end to end (title → main menu → campaign /
+battle setup / settings / scores / credits → arena placeholder → pause
+menu with its Yes/No confirmations).
 
 See [notes/NATIVE-PORT-001.md](../notes/NATIVE-PORT-001.md) for the full
 architecture, the PS3→native service map, and the roadmap.
@@ -18,9 +22,20 @@ architecture, the PS3→native service map, and the roadmap.
   otherwise, like the original's pad cursor). SDL-free and unit-tested.
 - `src/sdl_input.*` — the SDL3 backend: keyboard state, mouse, and
   hot-pluggable gamepads via SDL's gamepad API.
-- `src/main.cpp` — the frame loop and a debug view (arena grid, cursor,
-  button lamps) for verifying input by eye.
+- `src/text_table.*` — the game's string table: `text(index)` returns
+  the same strings the PS3 build shows, index-compatible with the
+  original's `local_text` loader. Data is generated into
+  `src/language1.inc` from the extracted table by
+  `scripts/gen_text_table.py`.
+- `src/menu_model.*` — the menu flow as a pure SDL-free state machine
+  (screens, selection, sliders/toggles/cycles, pause + confirmations,
+  the arena placeholder's state). Unit-tested.
+- `src/main.cpp` — the frame loop and renderer (SDL debug-text menus;
+  the arena screen shows the placeholder grid, cursor, and the current
+  mission's briefing text).
 - `tests/input_mapper_test.cpp` — headless checks for the merge logic.
+- `tests/menu_model_test.cpp` — headless checks driving the full menu
+  flow with synthetic input frames.
 
 ## Build
 
@@ -72,5 +87,9 @@ Start+Back together quits the host; closing the window does too.
 
 - Player 1 only for now; the model extends to 4 players (the original is
   1–4P) by sampling one `RawInput` per pad.
-- No game logic yet — the debug view stands in for the arena renderer.
-  Next milestones are in the port notes.
+- Menus are complete and faithful; gameplay is not there yet — entering
+  a mode lands on the arena placeholder (grid + briefing + working
+  pause menu). Host approximations are confined to value ranges the
+  strings don't pin down (e.g. Max Hits 1–20, volume 0–10).
+- Next milestones are in the port notes (boot walk and function naming
+  on the reconstruction side; PSGL-shim renderer on the host side).

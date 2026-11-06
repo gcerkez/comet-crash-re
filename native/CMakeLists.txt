@@ -22,7 +22,9 @@ endif()
 add_executable(comet_native
   src/main.cpp
   src/input_mapper.cpp
-  src/sdl_input.cpp)
+  src/sdl_input.cpp
+  src/text_table.cpp
+  src/menu_model.cpp)
 target_link_libraries(comet_native PRIVATE SDL3::SDL3)
 if(MSVC)
   target_compile_options(comet_native PRIVATE /W4)
@@ -37,3 +39,10 @@ add_executable(input_mapper_test
   tests/input_mapper_test.cpp
   src/input_mapper.cpp)
 add_test(NAME input_mapper COMMAND input_mapper_test)
+
+# Headless unit test for the menu state machine (SDL-free by design).
+add_executable(menu_model_test
+  tests/menu_model_test.cpp
+  src/menu_model.cpp
+  src/text_table.cpp)
+add_test(NAME menu_model COMMAND menu_model_test)
