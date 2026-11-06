@@ -39,11 +39,33 @@ struct LevelData {
     };
     struct Record24 {
         float value = 0.0f;
-        std::uint8_t bytes[4] = {0, 0, 0, 0}; // @4..7; selector @6, opcode @7
+        std::uint8_t bytes[20] = {}; // @4..23; selector @6, opcode @7, grid @4/@5
     };
 
     std::vector<Record56> records56;
     std::vector<Record24> records24;
+
+    // The rock economy (notes/RECONSTRUCTION-014.md): secondary
+    // records on selectors 20/21/22 are flying-rock events. A rock
+    // carries a Thorium payout in [amountLo, amountHi]; selector 20
+    // also names the cell where the rock appears.
+    struct RockEvent {
+        float time = 0.0f;
+        int selector = 0;
+        int amountLo = 0;
+        int amountHi = 0;
+        bool hasCell = false;
+        int cellX = 0;
+        int cellZ = 0;
+    };
+    std::vector<RockEvent> rockEvents;
+
+    // Base markers from the primary records: type 10 with
+    // raw[1] == 1 is player 1's base; type 29 is the enemy base.
+    bool hasPlayerBase = false;
+    int playerBaseX = 0, playerBaseZ = 0;
+    bool hasEnemyBase = false;
+    int enemyBaseX = 0, enemyBaseZ = 0;
 
     // Derived by level_parse: the type-0x0B record is the arena
     // extent marker — extent = max(b2, b3), defaulting to 24 when

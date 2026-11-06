@@ -53,11 +53,48 @@ bool LevelData::loadFromBuffer(const std::uint8_t* data, std::size_t size) {
     for (std::size_t i = 0; i < c24; ++i, p += 24) {
         Record24 r;
         r.value = readBEFloat(p);
-        for (int k = 0; k < 4; ++k) {
+        for (int k = 0; k < 20; ++k) {
             r.bytes[k] = p[4 + k];
         }
         records24.push_back(r);
     }
+    // Rock events and base markers.
+    rockEvents.clear();
+    hasPlayerBase = hasEnemyBase = false;
+    for (const Record24& r : records24) {
+        const int selector = (int)r.bytes[2];
+        if (selector < 20 || selector > 22) {
+            continue;
+        }
+        RockEvent ev;
+        ev.time = r.value;
+        ev.selector = selector;
+        if (selector == 20) {
+            ev.amountLo = (int)r.bytes[6];
+            ev.amountHi = (int)r.bytes[7];
+            ev.cellX = (int)r.bytes[0];
+            ev.cellZ = (int)r.bytes[1];
+            ev.hasCell = ev.cellX != 0 || ev.cellZ != 0;
+        } else {
+            ev.amountLo = ev.amountHi = (int)r.bytes[3];
+        }
+        if (ev.amountHi < ev.amountLo) {
+            ev.amountHi = ev.amountLo;
+        }
+        rockEvents.push_back(ev);
+    }
+    for (const Record56& r : records56) {
+        if (r.type == 10 && r.b1 == 1) {
+            hasPlayerBase = true;
+            playerBaseX = (int)r.b2;
+            playerBaseZ = (int)r.b3;
+        } else if (r.type == 29) {
+            hasEnemyBase = true;
+            enemyBaseX = (int)r.b2;
+            enemyBaseZ = (int)r.b3;
+        }
+    }
+
     // Derive the arena extent from the type-0x0B marker record and
     // filter the secondary records into the event list, mirroring
     // level_parse (the secondary section is consumed only when a

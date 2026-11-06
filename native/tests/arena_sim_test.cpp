@@ -8,6 +8,7 @@
 
 #include "../src/arena_sim.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -37,9 +38,9 @@ void put32(std::vector<unsigned char>& buf, std::size_t off, std::uint32_t v) {
 // t=2 kind 21 (starts the tower's construction), t=3 kind 26
 // (already active -> comet).
 comet::LevelData makeLevel() {
-    std::vector<unsigned char> buf(136 + 56 * 4 + 24 * 3, 0);
-    put32(buf, 0, 4);
-    put32(buf, 4, 3);
+    std::vector<unsigned char> buf(136 + 56 * 6 + 24 * 5, 0);
+    put32(buf, 0, 6);
+    put32(buf, 4, 5);
     put32(buf, 16, 300); // header[4]: starting Thorium (hypothesis)
     put32(buf, 20, 1);   // header[5]: units-to-win (hypothesis)
     unsigned char* rec = buf.data() + 136;
@@ -60,16 +61,50 @@ comet::LevelData makeLevel() {
     tow[1] = 3;
     tow[2] = 5;
     tow[3] = 2;
-    unsigned char* sec = rec + 224;
+    unsigned char* pbase = rec + 224;
+    pbase[0] = 10;
+    pbase[1] = 1; // player 1
+    pbase[2] = 8;
+    pbase[3] = 14;
+    unsigned char* ebase = rec + 280;
+    ebase[0] = 29;
+    ebase[1] = 1;
+    ebase[2] = 8;
+    ebase[3] = 1;
+    unsigned char* sec = rec + 336;
     const float times[3] = {1.0f, 2.0f, 3.0f};
     const unsigned char kinds[3] = {24, 21, 26};
+    const unsigned char cells[3][2] = {{12, 12}, {5, 2}, {8, 2}};
     for (int i = 0; i < 3; ++i) {
         unsigned char* r = sec + i * 24;
         std::uint32_t bits;
         std::memcpy(&bits, &times[i], 4);
         put32(buf, (std::size_t)(r - buf.data()), bits);
+        r[4] = cells[i][0];
+        r[5] = cells[i][1];
         r[6] = 1;
         r[7] = kinds[i];
+    }
+    unsigned char* rk1 = sec + 72;
+    {
+        const float t1 = 1.5f;
+        std::uint32_t bits;
+        std::memcpy(&bits, &t1, 4);
+        put32(buf, (std::size_t)(rk1 - buf.data()), bits);
+        rk1[6] = 21; // rock channel, payout in the opcode
+        rk1[7] = 40;
+    }
+    unsigned char* rk2 = sec + 96;
+    {
+        const float t2 = 2.5f;
+        std::uint32_t bits;
+        std::memcpy(&bits, &t2, 4);
+        put32(buf, (std::size_t)(rk2 - buf.data()), bits);
+        rk2[4] = 6; // appears at cell (6, 6)
+        rk2[5] = 6;
+        rk2[6] = 20; // rock channel with a payout range
+        rk2[10] = 35;
+        rk2[11] = 35;
     }
     comet::LevelData lv;
     if (!lv.loadFromBuffer(buf.data(), buf.size())) {
@@ -92,7 +127,15 @@ const comet::SimStructure* findKind(const comet::ArenaSim& sim, int kind) {
 
 int main() {
     comet::LevelData lv = makeLevel();
-    check(lv.events.size() == 3, "fixture keeps 3 events");
+    check(lv.events.size() == 3, "fixture keeps 3 construction events");
+    check(lv.rockEvents.size() == 2, "fixture keeps 2 rock events");
+    check(lv.rockEvents[0].amountLo == 40, "sel-21 rock pays its opcode");
+    check(lv.rockEvents[1].hasCell && lv.rockEvents[1].amountLo == 35,
+          "sel-20 rock carries cell + payout");
+    check(lv.hasPlayerBase && lv.playerBaseX == 8 && lv.playerBaseZ == 14,
+          "player base marker decoded");
+    check(lv.hasEnemyBase && lv.enemyBaseX == 8 && lv.enemyBaseZ == 1,
+          "enemy base marker decoded");
 
     comet::ArenaSim sim;
     sim.reset(&lv);
@@ -112,12 +155,11 @@ int main() {
 
     comet::input::InputFrame idle{};
     sim.update(idle, 0.5f);
-    sim.update(idle, 0.6f); // t=1.1: kind-24 event, no site -> comet
-    bool cometSeen = false;
-    for (const comet::SimEntity& e : sim.entities) {
-        cometSeen = cometSeen || !e.ground;
-    }
-    check(cometSeen, "unmatched event sends a comet");
+    sim.update(idle, 0.6f); // t=1.1: kind-24 order at cell (12,12)
+    const comet::SimStructure* built = findKind(sim, 24);
+    check(built != nullptr && built->state == 1 && built->x == 12.0f &&
+              built->y == 12.0f,
+          "script creates construction at the event's own cell");
 
     sim.update(idle, 1.0f); // t=2.1: kind-21 event starts construction
     check(findKind(sim, 21)->state == 1, "event starts tower construction");
@@ -135,6 +177,17 @@ int main() {
         }
     }
     check(deployed, "factory deploys a ground unit from its stockpile");
+
+    // Routed: deployed units march on the player base cell and
+    // score a base hit when they arrive.
+    {
+        bool arrived = false;
+        for (int i = 0; i < 240 && !arrived; ++i) {
+            sim.update(idle, 0.25f);
+            arrived = sim.baseHits >= 1;
+        }
+        check(arrived, "routed unit reaches the player base cell");
+    }
 
     // Ship flight still answers the input vector.
     comet::input::InputFrame left{};
@@ -221,14 +274,14 @@ int main() {
         check(won && s3.score >= 1, "player unit reaches the enemy base and wins");
     }
 
-    // Thorium: shooting down a meteor pays out.
+    // Thorium: shooting down a flying rock pays the rock's own
+    // amount (40 for the sel-21 rock, 35 for the sel-20 rock).
     {
         comet::ArenaSim s4;
         s4.reset(&lv);
         const int thStart = s4.thorium;
-        bool paid = false;
-        for (int i = 0; i < 600 && !paid; ++i) {
-            // Park the ship on any meteor and fire point-blank.
+        int gained = 0;
+        for (int i = 0; i < 900 && gained == 0; ++i) {
             for (const comet::SimEntity& e : s4.entities) {
                 if (e.kind == 90) {
                     s4.shipX = e.x;
@@ -239,9 +292,42 @@ int main() {
             f.buttons = comet::input::BtnAction;
             f.aimY = -1.0f;
             s4.update(f, 0.02f);
-            paid = s4.thorium > thStart;
+            gained = s4.thorium - thStart;
         }
-        check(paid, "downed meteor releases Thorium");
+        check(gained == 40 || gained == 35 || gained == 75,
+              "downed rock pays its own Thorium amount");
+    }
+
+    // Grab: holding Alt drags a nearby rock toward the ship.
+    {
+        comet::ArenaSim s5;
+        s5.reset(&lv);
+        s5.update(idle, 2.6f); // both rocks have appeared
+        const comet::SimEntity* rock = nullptr;
+        for (const comet::SimEntity& e : s5.entities) {
+            if (e.kind == 90 && e.value == 35) {
+                rock = &e;
+            }
+        }
+        check(rock != nullptr, "sel-20 rock appeared at its cell");
+        if (rock != nullptr) {
+            s5.shipX = rock->x + 1.2f;
+            s5.shipY = rock->y;
+            const float d0 = 1.2f;
+            comet::input::InputFrame grab{};
+            grab.buttons = comet::input::BtnAlt;
+            for (int i = 0; i < 25; ++i) {
+                s5.update(grab, 0.02f);
+            }
+            float d1 = 99.0f;
+            for (const comet::SimEntity& e : s5.entities) {
+                if (e.kind == 90 && e.value == 35) {
+                    const float dx = s5.shipX - e.x, dy = s5.shipY - e.y;
+                    d1 = std::sqrt(dx * dx + dy * dy);
+                }
+            }
+            check(d1 < d0 - 0.3f, "held grab pulls the rock toward the ship");
+        }
     }
 
     if (failures == 0) {

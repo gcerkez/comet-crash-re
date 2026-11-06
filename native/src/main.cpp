@@ -375,13 +375,15 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
             if (!ok) {
                 continue;
             }
+            const bool isRock = (e.kind == 90);
             const float warm = 0.55f + 0.10f * (float)(e.kind % 5);
             SDL_Vertex tri[3];
             const int fan[6] = {0, 1, 2, 0, 2, 3};
             for (int t2 = 0; t2 < 6; ++t2) {
                 const int k = fan[t2];
                 tri[t2 % 3].position = {px[k], py[k]};
-                tri[t2 % 3].color = {warm, 0.25f, 0.15f, 1.0f};
+                tri[t2 % 3].color = isRock ? SDL_FColor{0.55f, 0.46f, 0.34f, 1.0f}
+                                           : SDL_FColor{warm, 0.25f, 0.15f, 1.0f};
                 tri[t2 % 3].tex_coord = {0, 0};
                 if (t2 % 3 == 2) {
                     SDL_RenderGeometry(r, nullptr, tri, 3, nullptr, 0);
@@ -476,7 +478,7 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
         if (sim != nullptr) {
             char buf[128];
             std::snprintf(buf, sizeof(buf),
-                          "TIME %d   UNITS %d   KILLS %d   BASE %d/%d   THORIUM %d   SHIP %d%%   SCORE %d/%d   BUILD %d [SQUARE]",
+                          "TIME %d   UNITS %d   KILLS %d   BASE %d/%d   THORIUM %d   SHIP %d%%   SCORE %d/%d   BUILD %d [R1]",
                           (int)sim->timeSec, (int)sim->entities.size(), sim->kills,
                           sim->baseHits, sim->baseHitsLimit, sim->thorium,
                           sim->shipAlive ? sim->shipHealth : 0, sim->score,

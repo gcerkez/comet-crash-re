@@ -205,6 +205,16 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   Thorium / win target read from header hypotheses. Sources and
   the kind-identity map: notes/RECONSTRUCTION-013.md.
 
+## Milestone 11 — rocks, bases, routing
+
+- The invented meteor timer is gone: flying rocks come from the
+  level's selector-20/21/22 records with per-rock Thorium
+  payouts; the ship grabs and drags them (hold Alt). Base
+  markers (type 10 / type 29 primaries) anchor routed,
+  base-to-base ground movement (BFS; Gateways pass their own
+  side; construction may not seal the enemy path). Full
+  correction trail: notes/RECONSTRUCTION-014.md.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

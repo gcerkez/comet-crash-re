@@ -26,6 +26,7 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "input_types.h"
@@ -41,7 +42,11 @@ struct SimEntity { // a moving unit (ground unit or comet)
     bool alive = true;
     bool ground = true;
     bool playerOwned = false; // marches up-field and scores
-    float vx = 0.0f;          // meteors (kind 90) drift sideways
+    float vx = 0.0f, vy = 0.0f; // rocks (kind 90) drift
+    int value = 0;              // a rock's Thorium payout
+    std::vector<std::pair<int, int>> path; // BFS route (ground units)
+    std::size_t pathIdx = 0;
+    float repathTimer = 0.0f;
 };
 
 struct SimShot {
@@ -87,6 +92,9 @@ public:
     std::vector<SimStructure> structures; // incl. rocks (kind 9)
 
     int thorium = 100;
+    int thoriumMax = 1000; // the supply bar caps (training string 125)
+    float playerBaseX = 12.0f, playerBaseZ = 23.0f; // cell centers
+    float enemyBaseX = 12.0f, enemyBaseZ = 0.0f;
     int shipHealth = 100;
     bool shipAlive = true;
     float respawnTimer = 0.0f;
@@ -107,11 +115,15 @@ private:
     std::vector<LevelData::Record24> events_;
     float fireCooldown_ = 0.0f;
     unsigned spawnCounter_ = 0;
-    float meteorTimer_ = 5.0f;
-    void spawnMeteor();
+    std::vector<LevelData::RockEvent> rockEvents_;
+    std::size_t nextRock_ = 0;
     void destroyShip();
-    void activateNextStructure(int kind);
+    void activateNextStructure(int kind, int gx, int gz);
     void fireShot(float x, float y, float dx, float dy, bool fromPlayer);
+    void spawnRock(int amount, float x, float y, float vx);
+    bool routeExists(int sx, int sz, int tx, int tz, bool forPlayer) const;
+    std::vector<std::pair<int, int>> findPath(int sx, int sz, int tx, int tz,
+                                              bool forPlayer) const;
 };
 
 } // namespace comet

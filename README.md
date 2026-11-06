@@ -59,6 +59,7 @@ game binary itself.**
 - ✅ Cross-resource audit done; **placement cracked** (primary records sit at raw[2]/raw[3]) and the recovered **construction model** implemented: dormant structures activated by the level script, factory production, funded player builds (notes/RECONSTRUCTION-011.md)
 - ✅ **Mission setup recovered** from the decomp resources: per-kind initial levels + the raw[1] settlement rule, factories = kinds 26/28 with stockpile-and-deploy production, script events as timed construction (notes/RECONSTRUCTION-012.md)
 - ✅ Kind identities mapped (20 Base … 28 Special Ops; units 40–47); **Thorium economy from meteors, ship health/destruction/reset, and the offensive win condition** implemented (notes/RECONSTRUCTION-013.md)
+- ✅ **Rock economy corrected to the real mechanic**: data-driven flying rocks (selectors 20–22, per-rock payouts), ship grab-and-drag, base markers decoded, BFS base-to-base routing with unblockable-path construction (notes/RECONSTRUCTION-014.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target
