@@ -15,6 +15,7 @@ Following the initial bring-up in notes 032, the remaining startup blockers were
    ```
    With the default auto-responder answering `YES`, the title repeatedly attempted network auto-connection and re-prompted in a tight loop. Setting `MSGDIALOG_ANSWER=no` answers `NO`, disabling online leaderboards and allowing the title to advance.
 6. **Vulkan Wayland Swapchain Formats**: Modern AMD RADV under Wayland enumerates >64 surface formats. `rsx_vulkan_backend.c` clamped `nf` to 64, causing `vkGetPhysicalDeviceSurfaceFormatsKHR` to return `VK_INCOMPLETE` (`5`), which was previously treated as an error by `VK_CHECK` and caused the window to be dropped. Allowing `VK_INCOMPLETE` enabled swapchain initialization and true window presentation (`1280x720, 4 images, format 44`).
+7. **RSX FIFO CALL Command Encoding**: NV40 / RSX command decoding in `cellGcmSys.c` used a loose check `if ((w & 3) == 2)` for subroutine `CALL` instructions. When non-increasing methods (`type == 2`, bits 31-29 = `010`) arrived with bit 1 set in their method word (e.g. `0x567D1F52`), `cellGcmSys.c` misidentified the method as a `CALL 0x167D1F50`, halted the drain on unmapped IO, and reset the FIFO get pointer to 0, freezing graphics mid-frame. Constraining the check to `(w & 0xE0000003u) == 2u` ensures proper NV40 method vs CALL decoding.
 
 ## Boot Verification
 
