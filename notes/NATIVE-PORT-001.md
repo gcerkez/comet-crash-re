@@ -60,15 +60,15 @@ Controller input enters through the low-level **`sys_io`** library
 0x1CF98800  0x4D9B75D5  0x578E3C98  0x8B72CDA1  0xA703A51D  0xF65544EE
 ```
 
-This is the same low-level IO family the open PS3 SDK (PSL1GHT) exposes
-as `ioPadInit/ioPadGetData/...` — and that family also contains the
-keyboard (`ioKb*`) and mouse (`ioMouse*`) functions. A pad-only game
-typically needs 4 of the 6 slots (init/end/getInfo/getData), so built-in
-keyboard/mouse support in the original is **plausible but unproven** —
-it stays an open question until the hashes are matched to names. Either
-way, the native input layer covers all three device classes, so the port
-doesn't hinge on the answer; the hashes above are the checklist for the
-FNID pass.
+**Settled by the FNID pass (RECONSTRUCTION-002):** the six slots are
+`cellPadInit`, `cellPadEnd`, `cellPadGetData`, `cellPadGetInfo2`, and
+two still-unnamed hashes (`0x578E3C98`, `0xF65544EE`). Every
+keyboard/mouse candidate name from both SDK families (`cellKb*`,
+`cellMouse*`, `ioKb*`, `ioMouse*`) was hashed and none matched — the
+original has **no built-in keyboard/mouse support**; it is pad-only,
+and keyboard/mouse in this port is a native-side addition. The game's
+input seam is identified: `FUN_000dae30` calls `cellPadInit`,
+`FUN_00110738` is the per-frame `cellPadGetData` sampler.
 
 ## Milestone 1 (built): the native host shell
 

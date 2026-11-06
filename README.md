@@ -45,7 +45,10 @@ game binary itself.**
 - ✅ Import map decoded from `.lib.stub`: 20 libraries, 195 functions (incl. input = `sys_io`, 6 functions)
 - ✅ Native host milestone 1: builds and runs — SDL3 window, unified keyboard/mouse + hot-plug gamepad input, unit-tested mapper
 - ⬜ Startup chain walked from the entry OPD to `main`
-- ⬜ Import FNIDs matched to function names (hashes recorded in the port notes)
+- ✅ FNID pass: **134/195 imports named** and labeled in Ghidra; corpus v2 exported (notes/RECONSTRUCTION-002.md)
+- ✅ Input seam found: `FUN_000dae30` (pad init) and `FUN_00110738` (per-frame pad sampler); original proven pad-only — no built-in keyboard/mouse
+- ✅ Module map v1: corpus split into per-module files under decompiled/by-module/ (MultiStream 66, PSGL 21, local_text 9, C runtime 17, rest unassigned)
+- ✅ Language tables extracted: 265 English strings incl. all menu text (analysis/language/)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target
