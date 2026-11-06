@@ -77,9 +77,15 @@ bool ObjModel::loadFromText(const char* text, std::size_t size) {
             if (std::sscanf(line.c_str(), "vn %f %f %f", &x, &y, &z) == 3) {
                 normals.push_back({x, y, z});
             }
+        } else if (line[0] == 'v' && line[1] == 't') {
+            float u, v;
+            if (std::sscanf(line.c_str(), "vt %f %f", &u, &v) == 2) {
+                uvs.push_back({u, v});
+            }
         } else if (line[0] == 'f' && line[1] == ' ') {
             // Face corners in v, v/vt, v//vn, or v/vt/vn form.
             std::vector<int> vs;
+            std::vector<int> ts;
             std::vector<int> ns;
             const char* p = line.c_str() + 2;
             while (*p != '\0') {
@@ -96,10 +102,11 @@ bool ObjModel::loadFromText(const char* text, std::size_t size) {
                 }
                 p = end;
                 long ni = 0;
+                long ti = 0;
                 if (*p == '/') {
                     ++p;
                     if (*p != '/') {
-                        std::strtol(p, &end, 10); // vt, unused
+                        ti = std::strtol(p, &end, 10);
                         p = end;
                     }
                     if (*p == '/') {
@@ -109,6 +116,9 @@ bool ObjModel::loadFromText(const char* text, std::size_t size) {
                     }
                 }
                 vs.push_back(resolveIndex(static_cast<int>(vi), positions.size()));
+                ts.push_back(ti != 0
+                                 ? resolveIndex(static_cast<int>(ti), uvs.size())
+                                 : -1);
                 ns.push_back(ni != 0
                                  ? resolveIndex(static_cast<int>(ni), normals.size())
                                  : -1);
@@ -118,6 +128,9 @@ bool ObjModel::loadFromText(const char* text, std::size_t size) {
                 t.v[0] = vs[0];
                 t.v[1] = vs[k];
                 t.v[2] = vs[k + 1];
+                t.t[0] = ts[0];
+                t.t[1] = ts[k];
+                t.t[2] = ts[k + 1];
                 t.n[0] = ns[0];
                 t.n[1] = ns[k];
                 t.n[2] = ns[k + 1];

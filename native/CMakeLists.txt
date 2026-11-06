@@ -29,7 +29,8 @@ add_executable(comet_native
   src/sfx_player.cpp
   src/mp3_decode.cpp
   src/obj_model.cpp
-  src/arena_sim.cpp)
+  src/arena_sim.cpp
+  src/dds_texture.cpp)
 target_include_directories(comet_native PRIVATE third_party/minimp3)
 target_link_libraries(comet_native PRIVATE SDL3::SDL3)
 if(MSVC)
@@ -73,3 +74,10 @@ add_executable(arena_sim_test
   src/level_data.cpp)
 target_include_directories(arena_sim_test PRIVATE src)
 add_test(NAME arena_sim COMMAND arena_sim_test)
+
+# Headless unit test for the DDS decoder (SDL-free).
+add_executable(dds_texture_test
+  tests/dds_texture_test.cpp
+  src/dds_texture.cpp)
+target_include_directories(dds_texture_test PRIVATE src)
+add_test(NAME dds_texture COMMAND dds_texture_test)

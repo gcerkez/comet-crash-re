@@ -3,7 +3,8 @@
 // The shipped models (USRDIR/data/models/care/*.obj) are small
 // v/vt/vn triangle meshes with .mtl companions and DDS textures.
 // This loader reads geometry only (positions + normals, faces
-// triangulated by fan); texturing arrives with the DDS loader.
+// triangulated by fan); texture coordinates are kept for the
+// DDS-textured scene renderer.
 // Indices in OBJ are 1-based (with negative = relative support).
 
 #pragma once
@@ -20,10 +21,12 @@ struct ObjModel {
         // positions when the file provides vn; otherwise face
         // normals are computed into faceNormals).
         int v[3];
+        int t[3];
         int n[3];
     };
     std::vector<std::array<float, 3>> positions;
     std::vector<std::array<float, 3>> normals;
+    std::vector<std::array<float, 2>> uvs;
     std::vector<Triangle> triangles;
     std::vector<std::array<float, 3>> faceNormals; // parallel to triangles
     float radius = 0.0f; // bounding sphere radius around the origin

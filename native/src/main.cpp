@@ -28,6 +28,9 @@
 #include "level_data.h"
 #include "obj_model.h"
 #include "arena_sim.h"
+#include "dds_texture.h"
+
+#include <cstring>
 #include "menu_model.h"
 #include "sdl_input.h"
 #include "sfx_player.h"
@@ -172,11 +175,15 @@ void drawItemList(SDL_Renderer* r, float W, float H, const comet::Screen& s) {
 }
 
 
-// ---- minimal projected-3D scene (the PSGL stand-in for now) ----
+// ---- projected-3D scene (the PSGL stand-in for now) ----
 // PSGL is OpenGL ES 1.x; this host renderer plays the same role with
-// CPU projection + SDL_RenderGeometry triangles: a ground grid sized
-// from the level header extents and the game's own OBJ geometry,
-// lambert-shaded, painter-sorted.
+// CPU projection + SDL_RenderGeometry triangles. Presentation now
+// matches the original game (Jerry, 2026-11-06): a FIXED, steeply
+// tilted top-down camera — the map never moves — and the game's
+// own assets: DDS-textured OBJ models for the ship and units, and
+// the structure/agent DDS artwork as standing billboards (the
+// structure meshes themselves are not among the shipped files;
+// only fighter02.obj and scout02.obj are).
 
 struct Vec3f { float x, y, z; };
 
@@ -195,11 +202,13 @@ struct Camera {
     float focal; // in pixels
 };
 
-Camera makeCamera(float W, float H, double t) {
-    const float ang = (float)(t * 0.25);
+// Fixed camera: high, south of the field, looking slightly past
+// centre. Nothing here depends on time — the map is static.
+Camera makeCamera(float W, float H, float halfExtent) {
+    const float S = halfExtent * 2.0f;
     Camera c;
-    c.eye = {std::sin(ang) * 15.0f, 8.5f, std::cos(ang) * 15.0f};
-    const Vec3f target{0, 0.8f, 0};
+    c.eye = {0.0f, S * 0.80f, halfExtent + S * 0.55f};
+    const Vec3f target{0.0f, 0.0f, -S * 0.02f};
     c.fwd = vnorm(vsub(target, c.eye));
     c.right = vnorm(vcross(c.fwd, {0, 1, 0}));
     c.up = vcross(c.right, c.fwd);
@@ -221,194 +230,361 @@ bool project(const Camera& c, float W, float H, Vec3f p, float& sx, float& sy,
     return true;
 }
 
-void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
-                 const comet::LevelData* level, double t,
-                 const comet::ArenaSim* sim) {
-    const Camera cam = makeCamera(W, H, t);
-    // Ground extent from the level header (fields 3/4 are the large
-    // round numbers), clamped to a sane scene size.
-    float extent = 10.0f;
-    if (level != nullptr) {
-        // The arena is extent x extent cells (from the level's
-        // type-0x0B marker; 24 when the level has none).
-        extent = (float)level->extent * 0.5f;
+// The game's artwork, resolved from the model directory at start.
+struct SceneAssets {
+    comet::ObjModel scout;
+    bool haveScout = false;
+    SDL_Texture* shipTex = nullptr;
+    SDL_Texture* scoutTex = nullptr;
+    SDL_Texture* groundTex = nullptr;
+    SDL_Texture* rockTex = nullptr;
+    SDL_Texture* structTex[29] = {}; // by structure kind
+};
+
+std::string dirOf(const std::string& p) {
+    const std::size_t i = p.find_last_of('/');
+    return i == std::string::npos ? std::string(".") : p.substr(0, i);
+}
+
+SDL_Texture* loadDdsTexture(SDL_Renderer* r, const std::string& path) {
+    comet::RgbaImage img;
+    if (!comet::loadDdsFile(path.c_str(), img)) {
+        return nullptr;
     }
-    // Ground plane (two translucent triangles) + grid lines.
-    {
-        SDL_Vertex quad[4];
-        const Vec3f corners[4] = {{-extent, 0, -extent}, {extent, 0, -extent},
-                                  {extent, 0, extent}, {-extent, 0, extent}};
-        bool ok = true;
-        for (int i = 0; i < 4; ++i) {
-            float sx, sy, dep;
-            ok = ok && project(cam, W, H, corners[i], sx, sy, dep);
-            quad[i].position = {sx, sy};
-            quad[i].color = {0.05f, 0.08f, 0.13f, 0.85f};
-            quad[i].tex_coord = {0, 0};
-        }
-        if (ok) {
-            const int idx[6] = {0, 1, 2, 0, 2, 3};
-            SDL_RenderGeometry(r, nullptr, quad, 4, idx, 6);
-        }
-        SDL_SetRenderDrawColor(r, 40, 55, 80, 255);
-        const int lines = 10;
-        for (int i = -lines; i <= lines; ++i) {
-            const float g = extent * (float)i / (float)lines;
-            float x1, y1, d1, x2, y2, d2;
-            if (project(cam, W, H, {g, 0, -extent}, x1, y1, d1) &&
-                project(cam, W, H, {g, 0, extent}, x2, y2, d2)) {
-                SDL_RenderLine(r, x1, y1, x2, y2);
+    SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ABGR8888,
+                                       SDL_TEXTUREACCESS_STATIC, img.width,
+                                       img.height);
+    if (t == nullptr) {
+        return nullptr;
+    }
+    SDL_UpdateTexture(t, nullptr, img.rgba.data(), img.width * 4);
+    SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR);
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+    return t;
+}
+
+// The diffuse texture a model's sibling .mtl names in map_Kd.
+std::string mtlTexturePath(const std::string& objPath) {
+    const std::size_t dot = objPath.find_last_of('.');
+    const std::string mtlPath = objPath.substr(0, dot) + ".mtl";
+    std::FILE* f = std::fopen(mtlPath.c_str(), "rb");
+    if (f == nullptr) {
+        return std::string();
+    }
+    std::string found;
+    char line[512];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+        const char* p = std::strstr(line, "map_Kd");
+        if (p != nullptr) {
+            p += 6;
+            while (*p == ' ' || *p == '\t') {
+                ++p;
             }
-            if (project(cam, W, H, {-extent, 0, g}, x1, y1, d1) &&
-                project(cam, W, H, {extent, 0, g}, x2, y2, d2)) {
-                SDL_RenderLine(r, x1, y1, x2, y2);
+            std::string name(p);
+            while (!name.empty() &&
+                   (name.back() == '\n' || name.back() == '\r' ||
+                    name.back() == ' ')) {
+                name.pop_back();
+            }
+            if (!name.empty()) {
+                found = dirOf(objPath) + "/" + name;
+                break;
             }
         }
     }
-    // The model: spin around Y, hover, lambert shading, painter sort.
-    {
-        struct Tri { float sx[3], sy[3], depth, shade; };
-        std::vector<Tri> tris;
-        const bool piloted = (sim != nullptr);
-        const float rot = piloted ? sim->shipYaw : (float)(t * 0.8);
-        const float cs = std::cos(rot), sn = std::sin(rot);
-        const float scale = obj.radius > 0 ? (piloted ? 3.0f : 5.0f) / obj.radius * ((piloted && !sim->shipAlive) ? 0.0f : 1.0f) : 1.0f;
-        const float shipWX = piloted ? (sim->shipX - sim->extentCells * 0.5f) : 0.0f;
-        const float shipWZ = piloted ? (sim->shipY - sim->extentCells * 0.5f) : 0.0f;
+    std::fclose(f);
+    return found;
+}
+
+void buildSceneAssets(SDL_Renderer* r, const std::string& modelPath,
+                      SceneAssets& A) {
+    const std::string dir = dirOf(modelPath);        // .../data/models/care
+    const std::string dataRoot = dirOf(dirOf(dir));  // .../data
+    const std::string shipTexPath = mtlTexturePath(modelPath);
+    if (!shipTexPath.empty()) {
+        A.shipTex = loadDdsTexture(r, shipTexPath);
+    }
+    const std::string scoutPath = dir + "/scout02.obj";
+    if (A.scout.loadFromFile(scoutPath.c_str())) {
+        A.haveScout = true;
+        const std::string st = mtlTexturePath(scoutPath);
+        if (!st.empty()) {
+            A.scoutTex = loadDdsTexture(r, st);
+        }
+    }
+    A.groundTex = loadDdsTexture(
+        r, dataRoot + "/models/care/cometGaseous/cometGaseous_DC.dds");
+    A.rockTex = A.groundTex;
+    auto S = [&r, &A, &dataRoot](int kind, const char* rel) {
+        A.structTex[kind] = loadDdsTexture(r, dataRoot + rel);
+    };
+    // Cosmetic kind -> artwork mapping (the names are the game's).
+    S(20, "/models/care/weapons/structBasePlat_DC.dds"); // Base
+    S(21, "/models/care/weapons/structMissile_DC.dds");  // Turret
+    S(22, "/models/care/stunner_DC.dds");                // Pulsar
+    S(23, "/models/care/weapons/structLaser_DC.dds");    // Laser
+    S(24, "/models/care/weapons/structMissile_DC.dds");  // Bomber
+    S(25, "/models/care/converter_DC.dds");              // Gateway
+    S(26, "/models/care/structures/structBeacon_DC.dds"); // Basic Ops
+    S(28, "/models/care/structures/structBeacon_DC.dds"); // Special Ops
+    SDL_Log("scene assets: shipTex=%d scout=%d groundTex=%d",
+            A.shipTex != nullptr, (int)A.haveScout, A.groundTex != nullptr);
+}
+
+// A painter-sorted sink of projected, textured triangles.
+struct TriSink {
+    struct Item {
+        SDL_Texture* tex;
+        SDL_Vertex v[3];
+        float depth;
+    };
+    std::vector<Item> items;
+
+    void addTri(SDL_Texture* tex, const Camera& cam, float W, float H, Vec3f a,
+                Vec3f b, Vec3f c, SDL_FPoint ua, SDL_FPoint ub, SDL_FPoint uc,
+                SDL_FColor col) {
+        Item it{};
+        it.tex = tex;
+        const Vec3f pts[3] = {a, b, c};
+        const SDL_FPoint uvs[3] = {ua, ub, uc};
+        float dep = 0;
+        for (int k = 0; k < 3; ++k) {
+            float d;
+            if (!project(cam, W, H, pts[k], it.v[k].position.x,
+                         it.v[k].position.y, d)) {
+                return;
+            }
+            dep += d;
+            it.v[k].color = col;
+            it.v[k].tex_coord = uvs[k];
+        }
+        it.depth = dep / 3.0f;
+        items.push_back(it);
+    }
+
+    void addQuad(SDL_Texture* tex, const Camera& cam, float W, float H,
+                 Vec3f a, Vec3f b, Vec3f c, Vec3f d, SDL_FColor col) {
+        addTri(tex, cam, W, H, a, b, c, {0, 0}, {1, 0}, {1, 1}, col);
+        addTri(tex, cam, W, H, a, c, d, {0, 0}, {1, 1}, {0, 1}, col);
+    }
+
+    // A textured OBJ model placed in the world (lambert-shaded,
+    // vertex color = tint x shade).
+    void addModel(SDL_Texture* tex, const Camera& cam, float W, float H,
+                  const comet::ObjModel& obj, float wx, float wy, float wz,
+                  float yaw, float scale, SDL_FColor tint) {
+        const float cs = std::cos(yaw), sn = std::sin(yaw);
         const Vec3f light = vnorm({0.5f, 0.8f, 0.3f});
         for (std::size_t ti = 0; ti < obj.triangles.size(); ++ti) {
             const auto& tr = obj.triangles[ti];
-            Tri out{};
-            out.depth = 0;
-            bool ok = true;
+            Vec3f wp[3];
+            SDL_FPoint uv[3];
             for (int k = 0; k < 3; ++k) {
                 const auto& p = obj.positions[tr.v[k]];
-                const Vec3f wp{p[0] * scale * cs - p[2] * scale * sn + shipWX,
-                               p[1] * scale + 1.2f,
-                               p[0] * scale * sn + p[2] * scale * cs + shipWZ};
-                float dep;
-                ok = ok && project(cam, W, H, wp, out.sx[k], out.sy[k], dep);
-                out.depth += dep;
+                wp[k] = {p[0] * scale * cs - p[2] * scale * sn + wx,
+                         p[1] * scale + wy,
+                         p[0] * scale * sn + p[2] * scale * cs + wz};
+                if (tex != nullptr && tr.t[k] >= 0 &&
+                    tr.t[k] < (int)obj.uvs.size()) {
+                    const auto& t2 = obj.uvs[tr.t[k]];
+                    uv[k] = {t2[0], 1.0f - t2[1]}; // DDS rows are top-first
+                } else {
+                    uv[k] = {0, 0};
+                }
             }
-            if (!ok) {
-                continue;
-            }
-            out.depth /= 3.0f;
             const auto& fn = obj.faceNormals[ti];
-            const Vec3f n{fn[0] * cs - fn[2] * sn, fn[1], fn[0] * sn + fn[2] * cs};
+            const Vec3f n{fn[0] * cs - fn[2] * sn, fn[1],
+                          fn[0] * sn + fn[2] * cs};
             float lam = vdot(n, light);
             if (lam < 0) {
-                lam = -lam * 0.6f; // double-sided: dim the back
+                lam = -lam * 0.6f;
             }
-            out.shade = 0.30f + 0.70f * lam;
-            tris.push_back(out);
-        }
-        std::sort(tris.begin(), tris.end(),
-                  [](const Tri& a, const Tri& b) { return a.depth > b.depth; });
-        for (const Tri& tr : tris) {
-            SDL_Vertex verts[3];
-            for (int k = 0; k < 3; ++k) {
-                verts[k].position = {tr.sx[k], tr.sy[k]};
-                verts[k].color = {0.45f * tr.shade + 0.10f, 0.58f * tr.shade + 0.08f,
-                                  0.78f * tr.shade + 0.05f, 1.0f};
-                verts[k].tex_coord = {0, 0};
-            }
-            SDL_RenderGeometry(r, nullptr, verts, 3, nullptr, 0);
+            const float shade = 0.35f + 0.65f * lam;
+            const SDL_FColor col{tint.r * shade, tint.g * shade,
+                                 tint.b * shade, tint.a};
+            addTri(tex, cam, W, H, wp[0], wp[1], wp[2], uv[0], uv[1], uv[2],
+                   col);
         }
     }
-    // Placed content: rocks, dormant/active structures, builds.
+
+    // A camera-facing (around Y) standing quad — how the structure
+    // artwork is presented until their meshes are recovered.
+    void addBillboard(SDL_Texture* tex, const Camera& cam, float W, float H,
+                      float cx, float cz, float baseY, float w, float hgt,
+                      SDL_FColor col) {
+        Vec3f right{cam.right.x, 0.0f, cam.right.z};
+        right = vnorm(right);
+        const Vec3f bl{cx - right.x * w * 0.5f, baseY, cz - right.z * w * 0.5f};
+        const Vec3f br{cx + right.x * w * 0.5f, baseY, cz + right.z * w * 0.5f};
+        const Vec3f tl{bl.x, baseY + hgt, bl.z};
+        const Vec3f tr{br.x, baseY + hgt, br.z};
+        addQuad(tex, cam, W, H, bl, br, tr, tl, col);
+    }
+
+    void flush(SDL_Renderer* r) {
+        std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
+            return a.depth > b.depth;
+        });
+        for (const Item& it : items) {
+            SDL_RenderGeometry(r, it.tex, it.v, 3, nullptr, 0);
+        }
+        items.clear();
+    }
+};
+
+float cellHash(int x, int z) {
+    const unsigned h = (unsigned)(x * 73856093) ^ (unsigned)(z * 19349663);
+    return (float)(h % 100) / 100.0f;
+}
+
+void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
+                 const comet::LevelData* level, double t,
+                 const comet::ArenaSim* sim, const SceneAssets& A) {
+    float extent = 12.0f; // half-extent in world units (1 cell = 1 unit)
+    if (level != nullptr) {
+        extent = (float)level->extent * 0.5f;
+    }
+    const Camera cam = makeCamera(W, H, extent);
+    TriSink sink;
+
+    // Ground: one textured quad per cell (the comet surface art,
+    // repeated) with per-cell tint variation, over a dark apron.
+    const int cells = (int)(extent * 2.0f);
+    sink.addQuad(nullptr, cam, W, H, {-extent - 2, -0.05f, -extent - 2},
+                 {extent + 2, -0.05f, -extent - 2},
+                 {extent + 2, -0.05f, extent + 2},
+                 {-extent - 2, -0.05f, extent + 2},
+                 {0.03f, 0.04f, 0.06f, 1.0f});
+    for (int gz = 0; gz < cells; ++gz) {
+        for (int gx = 0; gx < cells; ++gx) {
+            const float x0 = gx - extent, z0 = gz - extent;
+            const float v = 0.55f + 0.40f * cellHash(gx, gz);
+            const SDL_FColor col = A.groundTex != nullptr
+                                       ? SDL_FColor{v, v, v * 0.96f, 1.0f}
+                                       : SDL_FColor{0.05f * v + 0.05f,
+                                                    0.08f * v + 0.06f,
+                                                    0.13f * v + 0.08f, 1.0f};
+            sink.addQuad(A.groundTex, cam, W, H, {x0, 0, z0}, {x0 + 1, 0, z0},
+                         {x0 + 1, 0, z0 + 1}, {x0, 0, z0 + 1}, col);
+        }
+    }
+
     if (sim != nullptr) {
         const float half = sim->extentCells * 0.5f;
-        auto diamond = [&](float gx, float gy, float s, SDL_FColor col) {
-            const Vec3f c{gx - half, 0.5f, gy - half};
-            const Vec3f pts[4] = {{c.x, c.y, c.z - s}, {c.x + s, c.y, c.z},
-                                  {c.x, c.y, c.z + s}, {c.x - s, c.y, c.z}};
-            float px[4], py[4], pd[4];
-            for (int k = 0; k < 4; ++k) {
-                if (!project(cam, W, H, pts[k], px[k], py[k], pd[k])) {
-                    return;
-                }
-            }
-            const int fan[6] = {0, 1, 2, 0, 2, 3};
-            SDL_Vertex tri[3];
-            for (int t2 = 0; t2 < 6; ++t2) {
-                const int k = fan[t2];
-                tri[t2 % 3].position = {px[k], py[k]};
-                tri[t2 % 3].color = col;
-                tri[t2 % 3].tex_coord = {0, 0};
-                if (t2 % 3 == 2) {
-                    SDL_RenderGeometry(r, nullptr, tri, 3, nullptr, 0);
-                }
-            }
+        // Base pads.
+        auto basePad = [&](float bx, float bz, bool player) {
+            const float cx = bx - half, cz = bz - half;
+            const SDL_FColor col = player ? SDL_FColor{0.10f, 0.45f, 0.42f, 1}
+                                          : SDL_FColor{0.50f, 0.14f, 0.10f, 1};
+            sink.addQuad(nullptr, cam, W, H, {cx - 0.8f, 0.02f, cz - 0.8f},
+                         {cx + 0.8f, 0.02f, cz - 0.8f},
+                         {cx + 0.8f, 0.02f, cz + 0.8f},
+                         {cx - 0.8f, 0.02f, cz + 0.8f}, col);
+            sink.addBillboard(A.structTex[20], cam, W, H, cx, cz, 0.0f, 1.6f,
+                              1.25f, {1, 1, 1, 1});
         };
-        for (const comet::SimStructure& s : sim->structures) {
-            SDL_FColor col;
-            float sz = 0.48f;
+        basePad(sim->playerBaseX, sim->playerBaseZ, true);
+        basePad(sim->enemyBaseX, sim->enemyBaseZ, false);
+
+        // Placed content: terrain rocks and structures as billboards
+        // with the game's artwork.
+        for (const auto& s : sim->structures) {
+            const float cx = s.x + 0.5f - half, cz = s.y + 0.5f - half;
             if (s.rock) {
-                col = {0.38f, 0.38f, 0.42f, 1.0f};
-            } else if (s.state == 0) {
-                col = {0.16f, 0.18f, 0.24f, 1.0f};
-            } else if (s.state == 1) {
-                col = {0.85f, 0.70f, 0.20f, 1.0f};
-                sz = 0.34f;
-            } else if (s.owner == 1) {
-                col = {0.15f, 0.65f, 0.60f, 1.0f};
-            } else {
-                col = {0.80f, 0.35f, 0.15f, 1.0f};
-            }
-            diamond(s.x + 0.5f, s.y + 0.5f, sz, col);
-        }
-    }
-    // Entities (spawned units) as ground markers + shots as points.
-    if (sim != nullptr) {
-        const float half = sim->extentCells * 0.5f;
-        for (const comet::SimEntity& e : sim->entities) {
-            const Vec3f c{e.x - half, 0.55f, e.y - half};
-            const float s = 0.42f;
-            const Vec3f pts[4] = {{c.x, c.y, c.z - s}, {c.x + s, c.y, c.z},
-                                  {c.x, c.y, c.z + s}, {c.x - s, c.y, c.z}};
-            float px[4], py[4], pd[4];
-            bool ok = true;
-            for (int k = 0; k < 4; ++k) {
-                ok = ok && project(cam, W, H, pts[k], px[k], py[k], pd[k]);
-            }
-            if (!ok) {
+                sink.addBillboard(A.rockTex, cam, W, H, cx, cz, 0.0f, 1.3f,
+                                  1.05f, {0.62f, 0.57f, 0.50f, 1.0f});
                 continue;
             }
-            const bool isRock = (e.kind == 90);
-            const float warm = 0.55f + 0.10f * (float)(e.kind % 5);
-            SDL_Vertex tri[3];
-            const int fan[6] = {0, 1, 2, 0, 2, 3};
-            for (int t2 = 0; t2 < 6; ++t2) {
-                const int k = fan[t2];
-                tri[t2 % 3].position = {px[k], py[k]};
-                tri[t2 % 3].color = isRock ? SDL_FColor{0.55f, 0.46f, 0.34f, 1.0f}
-                                           : SDL_FColor{warm, 0.25f, 0.15f, 1.0f};
-                tri[t2 % 3].tex_coord = {0, 0};
-                if (t2 % 3 == 2) {
-                    SDL_RenderGeometry(r, nullptr, tri, 3, nullptr, 0);
+            if (s.kind < 20 || s.kind > 28) {
+                continue;
+            }
+            SDL_Texture* tex = A.structTex[s.kind];
+            float wdt = 1.05f, hgt = 1.0f;
+            if (s.kind == 20) {
+                wdt = 1.5f;
+                hgt = 1.2f;
+            } else if (s.kind == 26 || s.kind == 28) {
+                wdt = 1.25f;
+                hgt = 1.1f;
+            }
+            SDL_FColor col;
+            if (s.state == 0) { // dormant site: low, dark silhouette
+                hgt *= 0.5f;
+                col = {0.38f, 0.38f, 0.44f, 1.0f};
+            } else if (s.state == 1) { // building: pulse
+                const float p = 0.8f + 0.2f * std::sin((float)t * 6.0f);
+                col = {p, p, p, 1.0f};
+            } else { // active: side tint
+                col = s.owner == 1 ? SDL_FColor{0.78f, 1.0f, 0.96f, 1.0f}
+                                    : SDL_FColor{1.0f, 0.80f, 0.68f, 1.0f};
+            }
+            sink.addBillboard(tex, cam, W, H, cx, cz, 0.0f, wdt, hgt, col);
+        }
+
+        // Units: the scout model (textured); flying rocks billboarded.
+        for (const auto& e : sim->entities) {
+            const float wx = e.x - half, wz = e.y - half;
+            if (e.kind == 90) {
+                sink.addBillboard(A.rockTex, cam, W, H, wx, wz, 0.15f, 0.85f,
+                                  0.8f, {1.0f, 1.0f, 1.0f, 1.0f});
+                continue;
+            }
+            const SDL_FColor tint = e.playerOwned
+                                        ? SDL_FColor{0.72f, 1.0f, 0.96f, 1.0f}
+                                        : SDL_FColor{1.0f, 0.80f, 0.68f, 1.0f};
+            if (A.haveScout) {
+                float yaw = e.playerOwned ? -1.5708f : 1.5708f;
+                if (e.pathIdx < (int)e.path.size()) {
+                    const float dx = e.path[e.pathIdx].first - e.x;
+                    const float dz = e.path[e.pathIdx].second - e.y;
+                    if (dx * dx + dz * dz > 0.0001f) {
+                        yaw = std::atan2(dz, dx);
+                    }
                 }
+                const float sc = A.scout.radius > 0 ? 0.5f / A.scout.radius : 1;
+                sink.addModel(A.scoutTex, cam, W, H, A.scout, wx, 0.30f, wz,
+                              yaw, sc, tint);
+            } else {
+                sink.addBillboard(A.scoutTex, cam, W, H, wx, wz, 0.0f, 0.8f,
+                                  0.7f, tint);
             }
         }
-        SDL_SetRenderDrawColor(r, 255, 240, 180, 255);
-        for (const comet::SimShot& s2 : sim->shots) {
+
+        // The player's ship: the fighter model with its own texture.
+        if (sim->shipAlive && !obj.empty()) {
+            const float sc = obj.radius > 0 ? 0.85f / obj.radius : 1.0f;
+            sink.addModel(A.shipTex, cam, W, H, obj, sim->shipX - half, 0.55f,
+                          sim->shipY - half, sim->shipYaw, sc,
+                          {1.0f, 1.0f, 1.0f, 1.0f});
+        }
+    }
+    sink.flush(r);
+
+    // Shots on top.
+    if (sim != nullptr) {
+        const float half = sim->extentCells * 0.5f;
+        SDL_SetRenderDrawColor(r, 255, 230, 150, 255);
+        for (const auto& s2 : sim->shots) {
             float sx, sy, dep;
-            if (project(cam, W, H, {s2.x - half, 0.8f, s2.y - half}, sx, sy, dep)) {
+            if (project(cam, W, H, {s2.x - half, 0.8f, s2.y - half}, sx, sy,
+                        dep)) {
                 SDL_RenderPoint(r, sx, sy);
             }
         }
     }
 }
 
+
 void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
                const InputFrame& frame, bool dimmed,
                const comet::LevelData* level, const comet::ObjModel* objModel,
-               double timeSec, const comet::ArenaSim* sim) {
+               double timeSec, const comet::ArenaSim* sim,
+               const SceneAssets& assets) {
     // With a model loaded, the arena is the projected 3D scene;
     // otherwise the milestone-1 grid + parsed-record overlay.
     const bool scene = (objModel != nullptr && !objModel->empty() && !dimmed);
     if (scene) {
-        drawScene3D(r, W, H, *objModel, level, timeSec, sim);
+        drawScene3D(r, W, H, *objModel, level, timeSec, sim, assets);
     }
     const float cell = H / 12.0f;
     SDL_SetRenderDrawColor(r, dimmed ? 18 : 30, dimmed ? 22 : 38, dimmed ? 30 : 52, 255);
@@ -459,37 +635,36 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
     SDL_RenderLine(r, cx, cy - 10, cx, cy + 10);
 
     if (!model.arenaUiHidden() && !dimmed) {
-        int title = model.arenaTitleStr();
-        if (title >= 0) {
-            drawText(r, 18, 14, 3.0f, 240, 200, 90, comet::text::text(title));
-        }
-        int body = model.arenaBodyStr();
-        if (body >= 0) {
-            drawBody(r, 18, 58, W * 0.62f, H * 0.6f, comet::text::text(body), 0);
-        }
-        drawText(r, 18, H - 30.0f, 2.0f, 130, 140, 155,
-                 "START: PAUSE    START+BACK: QUIT");
-        if (level != nullptr && !level->records56.empty()) {
-            char buf[96];
-            std::snprintf(buf, sizeof(buf), "LEVEL RECORDS: %u ORIENT + %u OBJECT (PARSED)",
-                          level->count56(), level->count24());
-            drawText(r, 18, H - 56.0f, 2.0f, 235, 180, 90, buf);
-        }
         if (sim != nullptr) {
+            // In-game HUD: two short lines that always fit.
             char buf[128];
-            std::snprintf(buf, sizeof(buf),
-                          "TIME %d   UNITS %d   KILLS %d   BASE %d/%d   THORIUM %d   SHIP %d%%   SCORE %d/%d   BUILD %d [R1]",
+            std::snprintf(buf, sizeof(buf), "TIME %d   UNITS %d   KILLS %d   BASE %d/%d",
                           (int)sim->timeSec, (int)sim->entities.size(), sim->kills,
-                          sim->baseHits, sim->baseHitsLimit, sim->thorium,
+                          sim->baseHits, sim->baseHitsLimit);
+            drawText(r, 18, 14.0f, 2.0f, 235, 235, 240, buf);
+            std::snprintf(buf, sizeof(buf),
+                          "THORIUM %d/%d   SHIP %d%%   SCORE %d/%d   BUILD %d [E]",
+                          sim->thorium, sim->thoriumMax,
                           sim->shipAlive ? sim->shipHealth : 0, sim->score,
                           sim->winTarget, sim->buildKind);
-            drawText(r, 18, 44.0f, 2.0f, 235, 235, 240, buf);
+            drawText(r, 18, 40.0f, 2.0f, 235, 235, 240, buf);
             if (sim->gameOver) {
                 drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 255, 90, 70, "BASE LOST");
             } else if (sim->cleared) {
                 drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 120, 255, 140, "WAVE CLEARED");
             }
+        } else {
+            int title = model.arenaTitleStr();
+            if (title >= 0) {
+                drawText(r, 18, 14, 3.0f, 240, 200, 90, comet::text::text(title));
+            }
+            int body = model.arenaBodyStr();
+            if (body >= 0) {
+                drawBody(r, 18, 58, W * 0.62f, H * 0.6f, comet::text::text(body), 0);
+            }
         }
+        drawText(r, 18, H - 30.0f, 2.0f, 130, 140, 155,
+                 "START: PAUSE    START+BACK: QUIT");
     }
 }
 
@@ -533,7 +708,9 @@ int main(int argc, char** argv) {
     const comet::LevelData* levelArg = haveLevel ? &level : nullptr;
     comet::ObjModel objModel;
     bool haveModel = false;
+    std::string modelPathStr;
     if (const char* modelPath = SDL_getenv("COMET_MODEL")) {
+        modelPathStr = modelPath;
         haveModel = objModel.loadFromFile(modelPath);
         if (logFrames) {
             SDL_Log("COMET_MODEL %s: %s (%zu verts, %zu tris)", modelPath,
@@ -542,6 +719,10 @@ int main(int argc, char** argv) {
         }
     }
     const comet::ObjModel* modelArg = haveModel ? &objModel : nullptr;
+    SceneAssets sceneAssets;
+    if (haveModel) {
+        buildSceneAssets(renderer, modelPathStr, sceneAssets);
+    }
     comet::ArenaSim sim;
     sim.timeScale = 6.0f; // v1 event pacing (uncalibrated; see arena_sim.h)
     bool simInArena = false;
@@ -644,7 +825,7 @@ int main(int argc, char** argv) {
 
         if (model.arenaBehind() && cur.id != comet::ScreenId::Arena) {
             drawArena(renderer, W, H, model, frame, true, levelArg, modelArg,
-                        (double)frameNo / 60.0, &sim);
+                        (double)frameNo / 60.0, &sim, sceneAssets);
             comet::FloatRect panel = comet::MenuModel::panelRect(W, H);
             SDL_SetRenderDrawColor(renderer, 12, 16, 26, 235);
             SDL_FRect pf{panel.x, panel.y, panel.w, panel.h};
@@ -657,7 +838,7 @@ int main(int argc, char** argv) {
             drawItemList(renderer, W, H, cur);
         } else if (cur.id == comet::ScreenId::Arena) {
             drawArena(renderer, W, H, model, frame, false, levelArg, modelArg,
-                        (double)frameNo / 60.0, &sim);
+                        (double)frameNo / 60.0, &sim, sceneAssets);
         } else if (cur.id == comet::ScreenId::Title) {
             drawTextCentered(renderer, W * 0.5f, H * 0.30f, 6.0f, 240, 200, 90,
                              cur.titleLiteral);

@@ -215,6 +215,14 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   side; construction may not seal the enemy path). Full
   correction trail: notes/RECONSTRUCTION-014.md.
 
+## Milestone 12 — presentation
+
+- Fixed, steeply tilted top-down camera (no orbit; the map is
+  static, as in the original). DDS decoder (uncompressed +
+  DXT1/3/5) feeds the game's own textures: fighter/scout OBJ
+  models textured, structures and rocks as artwork billboards,
+  cometGaseous ground. HUD fits on two lines. Notes 016.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export
