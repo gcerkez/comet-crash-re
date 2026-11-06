@@ -71,3 +71,5 @@ e5808,arena_enterInit
 17de0,psgl_loadMatrixf
 135170,gui_setWidgetSprite
 159d48,gui_resolveSpriteSize
+159de8,gui_measureText
+15adf8,gui_renderText
