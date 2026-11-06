@@ -30,6 +30,8 @@ game binary itself.**
 | Decompiled code | [decompiled/decompiled.c](decompiled/decompiled.c) | Ghidra decompilation of **all 843 functions** (~2.3 MB of C pseudocode). Names are `FUN_<address>` placeholders; this is reconstructed logic, not original source. |
 | Reconstruction notes | [notes/](notes/) | Human/AI findings as identification proceeds — start with [RECONSTRUCTION-001](notes/RECONSTRUCTION-001.md) (corpus tour, leaked source-file names, string-guided subsystem map). |
 | Cleaned reconstruction | [reconstruction/](reconstruction/) | Renamed, re-typed, commented code for subsystems we actually understand. Empty for now; grows from the notes. |
+| Native host | [native/](native/) | The C++17 + SDL3 app the reconstruction grows into. Milestone 1: window + frame loop + unified keyboard/mouse/gamepad input (the native stand-in for the original's `sys_io` pad sampling). |
+| Port notes | [notes/NATIVE-PORT-001.md](notes/NATIVE-PORT-001.md) | The module breakdown of the original, the decoded import map (20 libraries / 195 functions), the PS3→native service map, and the port roadmap. |
 | Tooling | [scripts/](scripts/) | The exact Ghidra export script used to produce the corpus, so every artifact here is reproducible. |
 
 ## Reconstruction progress
@@ -40,8 +42,10 @@ game binary itself.**
   `ObjectGroup.cpp`, `sound/engine.cpp`, `local_text.cpp`,
   `fontMapFormat.cpp`), the `gCometEnv` global, weapon/unit model taxonomy,
   the YouTube upload feature's API key string
+- ✅ Import map decoded from `.lib.stub`: 20 libraries, 195 functions (incl. input = `sys_io`, 6 functions)
+- ✅ Native host milestone 1: builds and runs — SDL3 window, unified keyboard/mouse + hot-plug gamepad input, unit-tested mapper
 - ⬜ Startup chain walked from the entry OPD to `main`
-- ⬜ PS3 SDK import stubs (FNIDs) resolved to library function names
+- ⬜ Import FNIDs matched to function names (hashes recorded in the port notes)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target
