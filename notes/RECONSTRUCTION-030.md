@@ -50,3 +50,18 @@ from readers by these scans), or an embedded blob.
 Next decisive step: build a caller map for the whole
 0x159xxx-0x15Dxxx cluster and find the non-cluster
 caller that runs at boot/GUI init.
+
+## Addendum (same day): the 0x15C128-0x15CAC8 "gap run"
+is gui_renderTexts tail
+
+## Addendum (same day): the 0x15C128-0x15CAC8 "gap run"
+is gui_renderText's tail
+
+No prologues and no OPD/vtable entries point into
+0x15C128-0x15CAC8. Extending gui_renderText's body over
+it (4,912 -> 7,376 B) decompiles cleanly (625 lines, no
+halt_baddata) and the extension references the glyph
+table 11 times — the table-stepping run was the
+renderer's own glyph loop all along, cut off by the
+same computed-branch carve limit as f3db0/105d80.
+Corpus still 2,647 functions, 0 failures.
