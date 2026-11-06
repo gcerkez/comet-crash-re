@@ -49,6 +49,7 @@ game binary itself.**
 - ✅ Input seam named: `pads_update` (0x111278) → `pads_sample` (0x110738, per-frame cellPadGetData); original proven pad-only — no built-in keyboard/mouse
 - ✅ Module map v1: corpus split into per-module files under decompiled/by-module/ (MultiStream 66, PSGL 21, local_text 9, C runtime 17, rest unassigned)
 - ✅ Language tables extracted: 265 English strings incl. all menu text (analysis/language/)
+- ✅ Frame chain named (main → game_run → game_loop → frame_input → pads_update)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target
