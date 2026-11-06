@@ -17,7 +17,7 @@ Following the initial bring-up in notes 032, the remaining startup blockers were
 
 ## Boot Verification
 
-With `MSGDIALOG_ANSWER=no PS3_VFS_ROOT=$HOME/tools/cc-recomp/vfs ./build/CometCrashRecomp`:
+With `PS3RECOMP_VK_WINDOW=1 MSGDIALOG_ANSWER=no PS3_VFS_ROOT=$HOME/tools/cc-recomp/vfs ./build/CometCrashRecomp`:
 - Shaders loaded and compiled: `font_rgba_shader`, `star_shader`, `particle_texture_shader`, `texture_shader`, `down_sample`, `shadows`, `bloom2light`, `hdr_glow_x/y`, `hdr_tone_map`, `lit_texture_shader`, `lit_object_shader`, `lit_texture_spec_gloss_shader`.
 - Models & textures streamed from `data1.pak`, `data2.pak`, and loose files: `playerShip.obj`, `playerShipDonut.obj`, `sun.obj`, `converter02.obj`, `stunner02.obj`, and advanced agent meshes (`agentAdv_Medic.obj`, `agentAdv_Carrier.obj`, `agentAdv_Laser.obj`).
 - Audio mixing thread active (`cellAudio` mixing port 0, SPU MultiStream taskset active).
