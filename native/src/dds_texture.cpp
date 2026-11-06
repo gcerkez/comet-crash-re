@@ -179,7 +179,7 @@ bool decodeDds(const std::uint8_t* data, std::size_t size, RgbaImage& out) {
     }
 
     const std::uint32_t bitCount = rd32(pf + 12);
-    if (bitCount != 24 && bitCount != 32) {
+    if (bitCount != 16 && bitCount != 24 && bitCount != 32) {
         return false;
     }
     const int bpp = (int)bitCount / 8;

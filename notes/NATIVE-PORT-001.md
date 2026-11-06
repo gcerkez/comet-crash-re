@@ -236,6 +236,20 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   (0x1F60xx-0x1F64xx); tracing its consumers is the next
   corpus job. Notes 018.
 
+## Milestone 14 — data-driven flow and the game's font
+
+- Levels load from the data root by menu selection (training
+  = level 0, campaign mission = its level, battle = probed
+  maps); COMET_MAP is a dev override only. All shell text
+  renders in the game's own BMFont (Proxima Nova) — the DDS
+  decoder learned 16-bit luminance+alpha for its page.
+  Camera moved closer/less tilted, and the HUD rearranged —
+  both still estimates, NOT code values: per Jerry's rule the
+  code is the definition of truth and screenshots only
+  measure distance. The registry struct's consumers were
+  found in the uncarved mission-setup hub; carving and
+  reading it is next. Notes 019.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

@@ -62,6 +62,7 @@ game binary itself.**
 - ✅ **Rock economy corrected to the real mechanic**: data-driven flying rocks (selectors 20–22, per-rock payouts), ship grab-and-drag, base markers decoded, BFS base-to-base routing with unblockable-path construction (notes/RECONSTRUCTION-014.md)
 - ✅ **Presentation pass**: fixed top-down camera (the map never moves), DDS texture pipeline, the game's own artwork in the scene — textured fighter/scout models, structure billboards, comet-surface ground (notes/RECONSTRUCTION-016.md)
 - ✅ **Full-asset rewire**: the complete base-game package recovered (all 44 registry models); the scene composes the named meshes — comet terrains, articulated structures on platforms, geode rocks (notes/RECONSTRUCTION-017.md, notes/RECONSTRUCTION-018.md)
+- ✅ **Menu-driven data flow + the game's own font**: levels selected in the menus load from the data root; all text in the game's BMFont (Proxima Nova). Camera/HUD geometry still estimates — the code is the definition of truth; its consumers were located in the uncarved setup hub (notes/RECONSTRUCTION-019.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target

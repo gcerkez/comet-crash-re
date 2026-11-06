@@ -36,12 +36,163 @@
 #include "sfx_player.h"
 #include "text_table.h"
 
+#include <unordered_map>
+
 using namespace comet::input;
 
 namespace {
 
+
+// The game's own bitmap font (BMFont binary, "Proxima Nova Rg"):
+// metrics from data/images/*.fnt, glyphs from the matching DDS
+// page — the same assets fontMapFormat.cpp parses in the
+// original. When loaded, all shell text uses it.
+struct BmfFont {
+    struct Glyph {
+        int x = 0, y = 0, w = 0, h = 0;
+        int xoff = 0, yoff = 0, xadv = 0;
+    };
+    std::unordered_map<unsigned, Glyph> glyphs;
+    int lineHeight = 0;
+    int scaleW = 1, scaleH = 1;
+    SDL_Texture* tex = nullptr;
+    bool ok = false;
+
+    bool parse(const std::string& fntPath) {
+        std::FILE* f = std::fopen(fntPath.c_str(), "rb");
+        if (f == nullptr) {
+            return false;
+        }
+        std::vector<unsigned char> d;
+        unsigned char buf[8192];
+        std::size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+            d.insert(d.end(), buf, buf + n);
+        }
+        std::fclose(f);
+        if (d.size() < 5 || d[0] != 'B' || d[1] != 'M' || d[2] != 'F' ||
+            d[3] != 3) {
+            return false;
+        }
+        std::string pageName;
+        std::size_t pos = 4;
+        auto u16 = [&](std::size_t o) {
+            return (unsigned)(d[o] | (d[o + 1] << 8));
+        };
+        auto u32 = [&](std::size_t o) {
+            return (unsigned)(d[o] | (d[o + 1] << 8) | (d[o + 2] << 16) |
+                              ((unsigned)d[o + 3] << 24));
+        };
+        auto i16 = [&](std::size_t o) { return (int)(short)u16(o); };
+        while (pos + 5 <= d.size()) {
+            const unsigned type = d[pos];
+            const unsigned size = u32(pos + 1);
+            const std::size_t b = pos + 5;
+            if (b + size > d.size()) {
+                break;
+            }
+            if (type == 2 && size >= 10) { // common
+                lineHeight = (int)u16(b);
+                scaleW = (int)u16(b + 4);
+                scaleH = (int)u16(b + 6);
+            } else if (type == 3) { // pages
+                pageName.assign((const char*)d.data() + b);
+            } else if (type == 4) { // chars
+                const unsigned count = size / 20;
+                for (unsigned i = 0; i < count; ++i) {
+                    const std::size_t o = b + i * 20;
+                    Glyph g;
+                    const unsigned id = u32(o);
+                    g.x = (int)u16(o + 4);
+                    g.y = (int)u16(o + 6);
+                    g.w = (int)u16(o + 8);
+                    g.h = (int)u16(o + 10);
+                    g.xoff = i16(o + 12);
+                    g.yoff = i16(o + 14);
+                    g.xadv = i16(o + 16);
+                    glyphs[id] = g;
+                }
+            }
+            pos = b + size;
+        }
+        if (lineHeight <= 0 || glyphs.empty() || pageName.empty()) {
+            return false;
+        }
+        pagePath_ = fntPath.substr(0, fntPath.find_last_of('/') + 1) + pageName;
+        return true;
+    }
+
+    float width(const std::string& str, float emPx) const {
+        const float s = emPx / (float)lineHeight;
+        float w = 0;
+        for (unsigned cp : decodeUtf8(str)) {
+            auto it = glyphs.find(cp);
+            if (it != glyphs.end()) {
+                w += it->second.xadv * s;
+            }
+        }
+        return w;
+    }
+
+    void draw(SDL_Renderer* r, float x, float y, float emPx, Uint8 cr,
+              Uint8 cg, Uint8 cb, const std::string& str) const {
+        if (tex == nullptr) {
+            return;
+        }
+        const float s = emPx / (float)lineHeight;
+        SDL_SetTextureColorMod(tex, cr, cg, cb);
+        float pen = x;
+        for (unsigned cp : decodeUtf8(str)) {
+            auto it = glyphs.find(cp);
+            if (it == glyphs.end()) {
+                continue;
+            }
+            const Glyph& g = it->second;
+            if (g.w > 0 && g.h > 0) {
+                SDL_FRect src{(float)g.x, (float)g.y, (float)g.w, (float)g.h};
+                SDL_FRect dst{pen + g.xoff * s, y + g.yoff * s, g.w * s,
+                              g.h * s};
+                SDL_RenderTexture(r, tex, &src, &dst);
+            }
+            pen += g.xadv * s;
+        }
+        SDL_SetTextureColorMod(tex, 255, 255, 255);
+    }
+
+    static std::vector<unsigned> decodeUtf8(const std::string& str) {
+        std::vector<unsigned> out;
+        for (std::size_t i = 0; i < str.size();) {
+            const unsigned char c = (unsigned char)str[i];
+            if (c < 0x80) {
+                out.push_back(c);
+                i += 1;
+            } else if ((c & 0xE0) == 0xC0 && i + 1 < str.size()) {
+                out.push_back(((c & 0x1F) << 6) |
+                              ((unsigned char)str[i + 1] & 0x3F));
+                i += 2;
+            } else if ((c & 0xF0) == 0xE0 && i + 2 < str.size()) {
+                out.push_back(((c & 0x0F) << 12) |
+                              (((unsigned char)str[i + 1] & 0x3F) << 6) |
+                              ((unsigned char)str[i + 2] & 0x3F));
+                i += 3;
+            } else {
+                i += 1;
+            }
+        }
+        return out;
+    }
+
+    std::string pagePath_;
+};
+
+BmfFont* gFont = nullptr;
+
 void drawText(SDL_Renderer* r, float x, float y, float scale,
               Uint8 cr, Uint8 cg, Uint8 cb, const std::string& str) {
+    if (gFont != nullptr && gFont->ok) {
+        gFont->draw(r, x, y, scale * 11.0f, cr, cg, cb, str);
+        return;
+    }
     SDL_SetRenderDrawColor(r, cr, cg, cb, 255);
     SDL_SetRenderScale(r, scale, scale);
     SDL_RenderDebugText(r, x / scale, y / scale, str.c_str());
@@ -49,6 +200,9 @@ void drawText(SDL_Renderer* r, float x, float y, float scale,
 }
 
 float textWidth(const std::string& s, float scale) {
+    if (gFont != nullptr && gFont->ok) {
+        return gFont->width(s, scale * 11.0f);
+    }
     return (float)s.size() * 8.0f * scale;
 }
 
@@ -207,12 +361,16 @@ struct Camera {
 Camera makeCamera(float W, float H, float halfExtent) {
     const float S = halfExtent * 2.0f;
     Camera c;
-    c.eye = {0.0f, S * 0.80f, halfExtent + S * 0.55f};
+    // Nearer and nearer top-down than the first pass: the
+    // original frames the whole comet with only a slight tilt.
+    // (The exact view comes from arenaGraphics in the corpus;
+    // this matches the shipped game's framing.)
+    c.eye = {0.0f, S * 1.06f, halfExtent + S * 0.20f};
     const Vec3f target{0.0f, 0.0f, -S * 0.02f};
     c.fwd = vnorm(vsub(target, c.eye));
     c.right = vnorm(vcross(c.fwd, {0, 1, 0}));
     c.up = vcross(c.right, c.fwd);
-    c.focal = (H * 0.5f) / std::tan(0.45f); // ~52 deg vertical fov
+    c.focal = (H * 0.5f) / std::tan(0.35f); // ~40 deg vertical fov
     (void)W;
     return c;
 }
@@ -228,6 +386,30 @@ bool project(const Camera& c, float W, float H, Vec3f p, float& sx, float& sy,
     sx = W * 0.5f + vdot(d, c.right) * c.focal / depth;
     sy = H * 0.5f - vdot(d, c.up) * c.focal / depth;
     return true;
+}
+
+SDL_Texture* loadDdsTexture(SDL_Renderer* r, const std::string& path);
+
+// Load the game's UI font (readable face) from the data root.
+void loadGameFont(SDL_Renderer* r, const std::string& dataRoot) {
+    if (dataRoot.empty()) {
+        return;
+    }
+    static BmfFont font;
+    const std::string fnt = dataRoot + "/images/wmd_font_readable.fnt";
+    if (font.parse(fnt)) {
+        font.tex = loadDdsTexture(r, font.pagePath_);
+        if (font.tex != nullptr) {
+            SDL_SetTextureBlendMode(font.tex, SDL_BLENDMODE_BLEND);
+        }
+        font.ok = font.tex != nullptr;
+        if (font.ok) {
+            gFont = &font;
+            SDL_Log("game font: %zu glyphs, lineHeight %d, page %s",
+                    font.glyphs.size(), font.lineHeight,
+                    font.pagePath_.c_str());
+        }
+    }
 }
 
 // One named model from the game's registry, with its texture.
@@ -789,18 +971,73 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
 
     if (!model.arenaUiHidden() && !dimmed) {
         if (sim != nullptr) {
-            // In-game HUD: two short lines that always fit.
-            char buf[128];
-            std::snprintf(buf, sizeof(buf), "TIME %d   UNITS %d   KILLS %d   BASE %d/%d",
-                          (int)sim->timeSec, (int)sim->entities.size(), sim->kills,
-                          sim->baseHits, sim->baseHitsLimit);
-            drawText(r, 18, 14.0f, 2.0f, 235, 235, 240, buf);
-            std::snprintf(buf, sizeof(buf),
-                          "THORIUM %d/%d   SHIP %d%%   SCORE %d/%d   BUILD %d [E]",
-                          sim->thorium, sim->thoriumMax,
-                          sim->shipAlive ? sim->shipHealth : 0, sim->score,
-                          sim->winTarget, sim->buildKind);
-            drawText(r, 18, 40.0f, 2.0f, 235, 235, 240, buf);
+            // In-game HUD in the original's arrangement: status
+            // panels down the left side (base + ship integrity,
+            // then Thorium with its bar), the mission clock at
+            // top centre, score at top right.
+            auto panel = [&](float px, float py, float pw, float ph) {
+                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(r, 10, 14, 22, 168);
+                SDL_FRect rc{px, py, pw, ph};
+                SDL_RenderFillRect(r, &rc);
+                SDL_SetRenderDrawColor(r, 110, 140, 175, 190);
+                SDL_RenderRect(r, &rc);
+                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+            };
+            auto bar = [&](float px, float py, float pw, float frac, Uint8 cr,
+                           Uint8 cg, Uint8 cb) {
+                if (frac < 0) frac = 0;
+                if (frac > 1) frac = 1;
+                SDL_SetRenderDrawColor(r, 28, 34, 46, 255);
+                SDL_FRect bg{px, py, pw, 9};
+                SDL_RenderFillRect(r, &bg);
+                if (frac > 0) {
+                    SDL_SetRenderDrawColor(r, cr, cg, cb, 255);
+                    SDL_FRect fg{px, py, pw * frac, 9};
+                    SDL_RenderFillRect(r, &fg);
+                }
+            };
+            const float px = 16, pw = 224;
+            panel(px, 56, pw, 96);
+            drawText(r, px + 12, 66, 1.5f, 175, 205, 230, "BASE");
+            bar(px + 12, 90, pw - 24,
+                sim->baseHitsLimit > 0
+                    ? 1.0f - (float)sim->baseHits / sim->baseHitsLimit
+                    : 0.0f,
+                90, 220, 160);
+            drawText(r, px + 12, 106, 1.5f, 175, 205, 230, "SHIP");
+            bar(px + 12, 130, pw - 24,
+                sim->shipAlive ? sim->shipHealth / 100.0f : 0.0f, 120, 200,
+                255);
+            panel(px, 160, pw, 66);
+            drawText(r, px + 12, 170, 1.5f, 255, 216, 130,
+                     comet::text::text(217)); // "Thorium"
+            {
+                char tb[48];
+                std::snprintf(tb, sizeof(tb), "%d/%d", sim->thorium,
+                              sim->thoriumMax);
+                drawText(r, px + pw - textWidth(tb, 1.5f) - 12, 170, 1.5f, 255,
+                         236, 190, tb);
+            }
+            bar(px + 12, 202, pw - 24,
+                sim->thoriumMax > 0 ? (float)sim->thorium / sim->thoriumMax
+                                    : 0.0f,
+                255, 190, 80);
+            {
+                char cb[32];
+                const int ts = (int)sim->timeSec;
+                std::snprintf(cb, sizeof(cb), "%d:%02d", ts / 60, ts % 60);
+                drawTextCentered(r, W * 0.5f, 12, 2.4f, 240, 244, 250, cb);
+                char sb[96];
+                std::snprintf(sb, sizeof(sb), "SCORE %d/%d   KILLS %d   UNITS %d",
+                              sim->score, sim->winTarget, sim->kills,
+                              (int)sim->entities.size());
+                drawText(r, W - textWidth(sb, 1.5f) - 16, 14, 1.5f, 220, 228,
+                         240, sb);
+                char bb[40];
+                std::snprintf(bb, sizeof(bb), "BUILD %d [E]", sim->buildKind);
+                drawText(r, px + 12, 234, 1.4f, 200, 210, 225, bb);
+            }
             if (sim->gameOver) {
                 drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 255, 90, 70, "BASE LOST");
             } else if (sim->cleared) {
@@ -848,6 +1085,30 @@ int main(int argc, char** argv) {
     SdlInput sdlInput;
     InputMapper mapper;
     comet::MenuModel model;
+    // The game's data root: COMET_DATA, else derived from
+    // COMET_MODEL (models/care/<ship>.obj -> ../../..). Levels are
+    // loaded from here (loose level*.map) or from the embedded-set
+    // directory COMET_LEVELS, chosen by the menus — the game boots
+    // to its title screen and the player picks the mission.
+    std::string gameDataRoot;
+    if (const char* dr = SDL_getenv("COMET_DATA")) {
+        gameDataRoot = dr;
+    } else if (const char* mp = SDL_getenv("COMET_MODEL")) {
+        std::string p = mp;
+        for (int i = 0; i < 3; ++i) {
+            const std::size_t s = p.find_last_of('/');
+            if (s == std::string::npos) {
+                p.clear();
+                break;
+            }
+            p = p.substr(0, s);
+        }
+        gameDataRoot = p;
+    }
+    std::string levelsDir = gameDataRoot;
+    if (const char* ld = SDL_getenv("COMET_LEVELS")) {
+        levelsDir = ld;
+    }
     comet::LevelData level;
     bool haveLevel = false;
     if (const char* mapPath = SDL_getenv("COMET_MAP")) {
@@ -859,14 +1120,47 @@ int main(int argc, char** argv) {
         }
     }
     const comet::LevelData* levelArg = haveLevel ? &level : nullptr;
+    // Menu-driven level loading (COMET_MAP stays as a dev
+    // override: when set, every run uses that one file).
+    comet::LevelData runLevel;
+    int runLevelId = -1;
+    auto loadRunLevel = [&](int id) -> bool {
+        char name[40];
+        std::snprintf(name, sizeof(name), "/level%u.map", (unsigned)id);
+        if (!gameDataRoot.empty() &&
+            runLevel.loadFromFile((gameDataRoot + name).c_str())) {
+            return true;
+        }
+        if (runLevel.loadFromFile((levelsDir + name).c_str())) {
+            return true;
+        }
+        SDL_Log("level %d: not found in data root or levels dir", id);
+        return false;
+    };
+    std::vector<int> battleLevels;
+    for (int id = 56; id <= 220 && battleLevels.size() < 24; ++id) {
+        char name[40];
+        std::snprintf(name, sizeof(name), "/level%u.map", (unsigned)id);
+        std::FILE* probe = std::fopen((gameDataRoot + name).c_str(), "rb");
+        if (probe == nullptr) {
+            probe = std::fopen((levelsDir + name).c_str(), "rb");
+        }
+        if (probe != nullptr) {
+            std::fclose(probe);
+            battleLevels.push_back(id);
+        }
+    }
     comet::ObjModel objModel;
     bool haveModel = false;
     std::string modelPathStr;
     if (const char* modelPath = SDL_getenv("COMET_MODEL")) {
         modelPathStr = modelPath;
         haveModel = objModel.loadFromFile(modelPath);
+    } else if (!gameDataRoot.empty()) {
+        modelPathStr = gameDataRoot + "/models/care/playerShip.obj";
+        haveModel = objModel.loadFromFile(modelPathStr.c_str());
         if (logFrames) {
-            SDL_Log("COMET_MODEL %s: %s (%zu verts, %zu tris)", modelPath,
+            SDL_Log("COMET_MODEL %s: %s (%zu verts, %zu tris)", modelPathStr.c_str(),
                     haveModel ? "loaded" : "FAILED", objModel.positions.size(),
                     objModel.triangles.size());
         }
@@ -875,6 +1169,7 @@ int main(int argc, char** argv) {
     SceneAssets sceneAssets;
     if (haveModel) {
         buildSceneAssets(renderer, modelPathStr, sceneAssets);
+        loadGameFont(renderer, gameDataRoot);
     }
     comet::ArenaSim sim;
     sim.timeScale = 6.0f; // v1 event pacing (uncalibrated; see arena_sim.h)
@@ -945,7 +1240,22 @@ int main(int argc, char** argv) {
         const comet::MenuAction act = model.takeAction();
         const bool inArenaNow = model.current().id == comet::ScreenId::Arena;
         if (inArenaNow && (!simInArena || act == comet::MenuAction::RestartRun)) {
-            sim.reset(levelArg);
+            if (haveLevel) {
+                sim.reset(levelArg); // COMET_MAP dev override
+            } else {
+                int want = runLevelId;
+                if (act == comet::MenuAction::StartTraining) {
+                    want = 0;
+                } else if (act == comet::MenuAction::StartMission) {
+                    want = model.actionParam() + 1;
+                } else if (act == comet::MenuAction::StartBattle) {
+                    want = battleLevels.empty() ? 61 : battleLevels[0];
+                }
+                if (want >= 0 && want != runLevelId && loadRunLevel(want)) {
+                    runLevelId = want;
+                }
+                sim.reset(runLevelId >= 0 ? &runLevel : nullptr);
+            }
         }
         simInArena = inArenaNow;
         if (inArenaNow) {
@@ -977,7 +1287,10 @@ int main(int argc, char** argv) {
         const comet::Screen& cur = model.current();
 
         if (model.arenaBehind() && cur.id != comet::ScreenId::Arena) {
-            drawArena(renderer, W, H, model, frame, true, levelArg, modelArg,
+            const comet::LevelData* sceneLevel =
+                haveLevel ? levelArg
+                          : (runLevelId >= 0 ? &runLevel : nullptr);
+            drawArena(renderer, W, H, model, frame, true, sceneLevel, modelArg,
                         (double)frameNo / 60.0, &sim, sceneAssets);
             comet::FloatRect panel = comet::MenuModel::panelRect(W, H);
             SDL_SetRenderDrawColor(renderer, 12, 16, 26, 235);
