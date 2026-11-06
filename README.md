@@ -55,6 +55,7 @@ game binary itself.**
 - ✅ Native host renders the game's own OBJ models in a projected 3D arena scene (COMET_MODEL; notes/RECONSTRUCTION-007.md)
 - ✅ The render chain is traced to the present step: game_loop → render step → frame_present (cellResc convert+flip) → gcm_flip (notes/RECONSTRUCTION-008.md)
 - ✅ Level semantics completed with cross-decomp validation (Stylish-Dark, different build): type-0x0B record = arena extent marker; secondary records = filtered spawn-event list; all 49 unique embedded levels extracted (notes/RECONSTRUCTION-009.md)
+- ✅ **The arena is playable**: native gameplay core (arena_sim) flies the ship on the level grid, spawns the level's own scheduled events, combat + base defense, HUD — verified headlessly on level61 (notes/RECONSTRUCTION-010.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target

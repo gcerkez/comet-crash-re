@@ -27,6 +27,7 @@
 #include "input_mapper.h"
 #include "level_data.h"
 #include "obj_model.h"
+#include "arena_sim.h"
 #include "menu_model.h"
 #include "sdl_input.h"
 #include "sfx_player.h"
@@ -221,7 +222,8 @@ bool project(const Camera& c, float W, float H, Vec3f p, float& sx, float& sy,
 }
 
 void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
-                 const comet::LevelData* level, double t) {
+                 const comet::LevelData* level, double t,
+                 const comet::ArenaSim* sim) {
     const Camera cam = makeCamera(W, H, t);
     // Ground extent from the level header (fields 3/4 are the large
     // round numbers), clamped to a sane scene size.
@@ -267,9 +269,12 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
     {
         struct Tri { float sx[3], sy[3], depth, shade; };
         std::vector<Tri> tris;
-        const float rot = (float)(t * 0.8);
+        const bool piloted = (sim != nullptr);
+        const float rot = piloted ? sim->shipYaw : (float)(t * 0.8);
         const float cs = std::cos(rot), sn = std::sin(rot);
-        const float scale = obj.radius > 0 ? 5.0f / obj.radius : 1.0f;
+        const float scale = obj.radius > 0 ? (piloted ? 3.0f : 5.0f) / obj.radius : 1.0f;
+        const float shipWX = piloted ? (sim->shipX - sim->extentCells * 0.5f) : 0.0f;
+        const float shipWZ = piloted ? (sim->shipY - sim->extentCells * 0.5f) : 0.0f;
         const Vec3f light = vnorm({0.5f, 0.8f, 0.3f});
         for (std::size_t ti = 0; ti < obj.triangles.size(); ++ti) {
             const auto& tr = obj.triangles[ti];
@@ -278,9 +283,9 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
             bool ok = true;
             for (int k = 0; k < 3; ++k) {
                 const auto& p = obj.positions[tr.v[k]];
-                const Vec3f wp{p[0] * scale * cs - p[2] * scale * sn,
-                               p[1] * scale + 1.4f,
-                               p[0] * scale * sn + p[2] * scale * cs};
+                const Vec3f wp{p[0] * scale * cs - p[2] * scale * sn + shipWX,
+                               p[1] * scale + 1.2f,
+                               p[0] * scale * sn + p[2] * scale * cs + shipWZ};
                 float dep;
                 ok = ok && project(cam, W, H, wp, out.sx[k], out.sy[k], dep);
                 out.depth += dep;
@@ -311,17 +316,54 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
             SDL_RenderGeometry(r, nullptr, verts, 3, nullptr, 0);
         }
     }
+    // Entities (spawned units) as ground markers + shots as points.
+    if (sim != nullptr) {
+        const float half = sim->extentCells * 0.5f;
+        for (const comet::SimEntity& e : sim->entities) {
+            const Vec3f c{e.x - half, 0.55f, e.y - half};
+            const float s = 0.42f;
+            const Vec3f pts[4] = {{c.x, c.y, c.z - s}, {c.x + s, c.y, c.z},
+                                  {c.x, c.y, c.z + s}, {c.x - s, c.y, c.z}};
+            float px[4], py[4], pd[4];
+            bool ok = true;
+            for (int k = 0; k < 4; ++k) {
+                ok = ok && project(cam, W, H, pts[k], px[k], py[k], pd[k]);
+            }
+            if (!ok) {
+                continue;
+            }
+            const float warm = 0.55f + 0.10f * (float)(e.kind % 5);
+            SDL_Vertex tri[3];
+            const int fan[6] = {0, 1, 2, 0, 2, 3};
+            for (int t2 = 0; t2 < 6; ++t2) {
+                const int k = fan[t2];
+                tri[t2 % 3].position = {px[k], py[k]};
+                tri[t2 % 3].color = {warm, 0.25f, 0.15f, 1.0f};
+                tri[t2 % 3].tex_coord = {0, 0};
+                if (t2 % 3 == 2) {
+                    SDL_RenderGeometry(r, nullptr, tri, 3, nullptr, 0);
+                }
+            }
+        }
+        SDL_SetRenderDrawColor(r, 255, 240, 180, 255);
+        for (const comet::SimShot& s2 : sim->shots) {
+            float sx, sy, dep;
+            if (project(cam, W, H, {s2.x - half, 0.8f, s2.y - half}, sx, sy, dep)) {
+                SDL_RenderPoint(r, sx, sy);
+            }
+        }
+    }
 }
 
 void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
                const InputFrame& frame, bool dimmed,
                const comet::LevelData* level, const comet::ObjModel* objModel,
-               double timeSec) {
+               double timeSec, const comet::ArenaSim* sim) {
     // With a model loaded, the arena is the projected 3D scene;
     // otherwise the milestone-1 grid + parsed-record overlay.
     const bool scene = (objModel != nullptr && !objModel->empty() && !dimmed);
     if (scene) {
-        drawScene3D(r, W, H, *objModel, level, timeSec);
+        drawScene3D(r, W, H, *objModel, level, timeSec, sim);
     }
     const float cell = H / 12.0f;
     SDL_SetRenderDrawColor(r, dimmed ? 18 : 30, dimmed ? 22 : 38, dimmed ? 30 : 52, 255);
@@ -388,6 +430,18 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
                           level->count56(), level->count24());
             drawText(r, 18, H - 56.0f, 2.0f, 235, 180, 90, buf);
         }
+        if (sim != nullptr) {
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "TIME %d   UNITS %d   KILLS %d   BASE %d/%d",
+                          (int)sim->timeSec, (int)sim->entities.size(), sim->kills,
+                          sim->baseHits, sim->baseHitsLimit);
+            drawText(r, 18, 44.0f, 2.0f, 235, 235, 240, buf);
+            if (sim->gameOver) {
+                drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 255, 90, 70, "BASE LOST");
+            } else if (sim->cleared) {
+                drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 120, 255, 140, "WAVE CLEARED");
+            }
+        }
     }
 }
 
@@ -440,6 +494,9 @@ int main(int argc, char** argv) {
         }
     }
     const comet::ObjModel* modelArg = haveModel ? &objModel : nullptr;
+    comet::ArenaSim sim;
+    sim.timeScale = 6.0f; // v1 event pacing (uncalibrated; see arena_sim.h)
+    bool simInArena = false;
     comet::SfxPlayer sfx;
     if (const char* sfxDir = SDL_getenv("COMET_SFX_DIR")) {
         const int n = sfx.loadFromDir(sfxDir);
@@ -480,20 +537,42 @@ int main(int argc, char** argv) {
         // Demo script (COMET_START_ARENA=1): synthetic frames walk
         // Title -> Campaign -> Area 1 -> Start Game so the arena (and
         // the 3D scene) can be smoke-tested headlessly.
-        if (SDL_getenv("COMET_START_ARENA") != nullptr && frameNo < 10) {
-            InputFrame demo{};
-            switch (frameNo) {
-                case 1: demo.pressed = demo.buttons = BtnStart; break;
-                case 3: demo.moveY = 1.0f; break;
-                case 5: case 7: case 9:
-                    demo.pressed = demo.buttons = BtnConfirm; break;
-                default: break;
+        InputFrame effFrame = frame;
+        if (SDL_getenv("COMET_START_ARENA") != nullptr) {
+            if (frameNo < 10) {
+                InputFrame demo{};
+                switch (frameNo) {
+                    case 1: demo.pressed = demo.buttons = BtnStart; break;
+                    case 3: demo.moveY = 1.0f; break;
+                    case 5: case 7: case 9:
+                        demo.pressed = demo.buttons = BtnConfirm; break;
+                    default: break;
+                }
+                effFrame = demo;
+            } else if (model.current().id == comet::ScreenId::Arena) {
+                // Gameplay demo: patrol + fire so headless runs
+                // exercise flight, spawning, and combat.
+                InputFrame demo{};
+                demo.moveX = ((frameNo / 45) % 2 == 0) ? 0.7f : -0.7f;
+                demo.buttons = ((frameNo % 50) < 25) ? BtnAction : 0;
+                demo.aimY = -1.0f;
+                effFrame = demo;
             }
-            model.update(demo, (float)winW, (float)winH);
-        } else {
-            model.update(frame, (float)winW, (float)winH);
         }
-        (void)model.takeAction();  // run-start hooks land with gameplay
+        model.update(effFrame, (float)winW, (float)winH);
+        const comet::MenuAction act = model.takeAction();
+        const bool inArenaNow = model.current().id == comet::ScreenId::Arena;
+        if (inArenaNow && (!simInArena || act == comet::MenuAction::RestartRun)) {
+            sim.reset(levelArg);
+        }
+        simInArena = inArenaNow;
+        if (inArenaNow) {
+            sim.update(effFrame, 1.0f / 60.0f);
+            if (sim.fxLaser > 0) {
+                sfx.play(comet::Sfx::Laser);
+                sim.fxLaser = 0;
+            }
+        }
 
         // One-shot SFX (MultiStream's job on PS3): the bank's own
         // item-choose click on menu confirms, its build sound on
@@ -513,7 +592,7 @@ int main(int argc, char** argv) {
 
         if (model.arenaBehind() && cur.id != comet::ScreenId::Arena) {
             drawArena(renderer, W, H, model, frame, true, levelArg, modelArg,
-                        (double)frameNo / 60.0);
+                        (double)frameNo / 60.0, &sim);
             comet::FloatRect panel = comet::MenuModel::panelRect(W, H);
             SDL_SetRenderDrawColor(renderer, 12, 16, 26, 235);
             SDL_FRect pf{panel.x, panel.y, panel.w, panel.h};
@@ -526,7 +605,7 @@ int main(int argc, char** argv) {
             drawItemList(renderer, W, H, cur);
         } else if (cur.id == comet::ScreenId::Arena) {
             drawArena(renderer, W, H, model, frame, false, levelArg, modelArg,
-                        (double)frameNo / 60.0);
+                        (double)frameNo / 60.0, &sim);
         } else if (cur.id == comet::ScreenId::Title) {
             drawTextCentered(renderer, W * 0.5f, H * 0.30f, 6.0f, 240, 200, 90,
                              cur.titleLiteral);
@@ -558,6 +637,12 @@ int main(int argc, char** argv) {
             SDL_Log("frame %ld screen=%d selected=%d buttons=%08x cursor=%.0f,%.0f",
                     frameNo, (int)cur.id, cur.selected, frame.buttons, frame.cursorX,
                     frame.cursorY);
+            if (cur.id == comet::ScreenId::Arena) {
+                SDL_Log("sim t=%.0f ents=%d shots=%d base=%d kills=%d spawned=%zu/%d %s",
+                        sim.timeSec, (int)sim.entities.size(), (int)sim.shots.size(),
+                        sim.baseHits, sim.kills, sim.nextEvent, sim.eventsTotal,
+                        sim.gameOver ? "GAMEOVER" : (sim.cleared ? "CLEARED" : ""));
+            }
         }
         if (maxFrames > 0 && frameNo >= maxFrames) {
             SDL_Log("exited cleanly after %ld frames", frameNo);

@@ -28,7 +28,8 @@ add_executable(comet_native
   src/level_data.cpp
   src/sfx_player.cpp
   src/mp3_decode.cpp
-  src/obj_model.cpp)
+  src/obj_model.cpp
+  src/arena_sim.cpp)
 target_include_directories(comet_native PRIVATE third_party/minimp3)
 target_link_libraries(comet_native PRIVATE SDL3::SDL3)
 if(MSVC)
@@ -61,5 +62,14 @@ add_test(NAME level_data COMMAND level_data_test)
 # Headless unit test for the OBJ loader (SDL-free).
 add_executable(obj_model_test
   tests/obj_model_test.cpp
-  src/obj_model.cpp)
+  src/obj_model.cpp
+  src/arena_sim.cpp)
 add_test(NAME obj_model COMMAND obj_model_test)
+
+# Headless unit test for the arena simulation (SDL-free).
+add_executable(arena_sim_test
+  tests/arena_sim_test.cpp
+  src/arena_sim.cpp
+  src/level_data.cpp)
+target_include_directories(arena_sim_test PRIVATE src)
+add_test(NAME arena_sim COMMAND arena_sim_test)

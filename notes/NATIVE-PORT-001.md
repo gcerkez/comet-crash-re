@@ -168,6 +168,18 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   picks the model; `COMET_START_ARENA=1` boots straight into the
   arena for headless smoke tests.
 
+## Milestone 7 — playable arena
+
+- `native/src/arena_sim.*`: gameplay core on the recovered
+  structure — extent grid, the level's filtered spawn events as
+  the schedule, ship flight + Attack-button fire from the unified
+  InputFrame, base-hit defense, wave clear. The OBJ fighter is
+  the player ship on the grid; HUD shows TIME/UNITS/KILLS/BASE;
+  Laser SFX on fire/kills. Unit-tested; verified headlessly on
+  level61 with the demo pilot. v1 simplifications (spawn spread,
+  placeholder speeds/pacing, no construction yet) are listed in
+  notes/RECONSTRUCTION-010.md.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export
