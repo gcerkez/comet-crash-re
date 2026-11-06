@@ -180,6 +180,15 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   placeholder speeds/pacing, no construction yet) are listed in
   notes/RECONSTRUCTION-010.md.
 
+## Milestone 8 — placed content + construction
+
+- Primary records render and behave as placed content at
+  (raw[2], raw[3]): rocks block, structures (kinds 20–28) start
+  dormant and are activated by the level's timed script;
+  factories produce ground units; towers auto-fire; the player
+  builds funded towers (Thorium, occupancy check, build timer).
+  Model and audit trail: notes/RECONSTRUCTION-011.md.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

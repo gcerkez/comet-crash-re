@@ -56,6 +56,7 @@ game binary itself.**
 - ✅ The render chain is traced to the present step: game_loop → render step → frame_present (cellResc convert+flip) → gcm_flip (notes/RECONSTRUCTION-008.md)
 - ✅ Level semantics completed with cross-decomp validation (Stylish-Dark, different build): type-0x0B record = arena extent marker; secondary records = filtered spawn-event list; all 49 unique embedded levels extracted (notes/RECONSTRUCTION-009.md)
 - ✅ **The arena is playable**: native gameplay core (arena_sim) flies the ship on the level grid, spawns the level's own scheduled events, combat + base defense, HUD — verified headlessly on level61 (notes/RECONSTRUCTION-010.md)
+- ✅ Cross-resource audit done; **placement cracked** (primary records sit at raw[2]/raw[3]) and the recovered **construction model** implemented: dormant structures activated by the level script, factory production, funded player builds (notes/RECONSTRUCTION-011.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target

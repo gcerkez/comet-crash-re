@@ -316,6 +316,49 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
             SDL_RenderGeometry(r, nullptr, verts, 3, nullptr, 0);
         }
     }
+    // Placed content: rocks, dormant/active structures, builds.
+    if (sim != nullptr) {
+        const float half = sim->extentCells * 0.5f;
+        auto diamond = [&](float gx, float gy, float s, SDL_FColor col) {
+            const Vec3f c{gx - half, 0.5f, gy - half};
+            const Vec3f pts[4] = {{c.x, c.y, c.z - s}, {c.x + s, c.y, c.z},
+                                  {c.x, c.y, c.z + s}, {c.x - s, c.y, c.z}};
+            float px[4], py[4], pd[4];
+            for (int k = 0; k < 4; ++k) {
+                if (!project(cam, W, H, pts[k], px[k], py[k], pd[k])) {
+                    return;
+                }
+            }
+            const int fan[6] = {0, 1, 2, 0, 2, 3};
+            SDL_Vertex tri[3];
+            for (int t2 = 0; t2 < 6; ++t2) {
+                const int k = fan[t2];
+                tri[t2 % 3].position = {px[k], py[k]};
+                tri[t2 % 3].color = col;
+                tri[t2 % 3].tex_coord = {0, 0};
+                if (t2 % 3 == 2) {
+                    SDL_RenderGeometry(r, nullptr, tri, 3, nullptr, 0);
+                }
+            }
+        };
+        for (const comet::SimStructure& s : sim->structures) {
+            SDL_FColor col;
+            float sz = 0.48f;
+            if (s.rock) {
+                col = {0.38f, 0.38f, 0.42f, 1.0f};
+            } else if (s.state == 0) {
+                col = {0.16f, 0.18f, 0.24f, 1.0f};
+            } else if (s.state == 1) {
+                col = {0.85f, 0.70f, 0.20f, 1.0f};
+                sz = 0.34f;
+            } else if (s.owner == 1) {
+                col = {0.15f, 0.65f, 0.60f, 1.0f};
+            } else {
+                col = {0.80f, 0.35f, 0.15f, 1.0f};
+            }
+            diamond(s.x + 0.5f, s.y + 0.5f, sz, col);
+        }
+    }
     // Entities (spawned units) as ground markers + shots as points.
     if (sim != nullptr) {
         const float half = sim->extentCells * 0.5f;
@@ -432,9 +475,10 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
         }
         if (sim != nullptr) {
             char buf[128];
-            std::snprintf(buf, sizeof(buf), "TIME %d   UNITS %d   KILLS %d   BASE %d/%d",
+            std::snprintf(buf, sizeof(buf),
+                          "TIME %d   UNITS %d   KILLS %d   BASE %d/%d   THORIUM %d   BUILD %d [SQUARE]",
                           (int)sim->timeSec, (int)sim->entities.size(), sim->kills,
-                          sim->baseHits, sim->baseHitsLimit);
+                          sim->baseHits, sim->baseHitsLimit, sim->thorium, sim->buildKind);
             drawText(r, 18, 44.0f, 2.0f, 235, 235, 240, buf);
             if (sim->gameOver) {
                 drawTextCentered(r, W * 0.5f, H * 0.42f, 4.0f, 255, 90, 70, "BASE LOST");
@@ -571,6 +615,10 @@ int main(int argc, char** argv) {
             if (sim.fxLaser > 0) {
                 sfx.play(comet::Sfx::Laser);
                 sim.fxLaser = 0;
+            }
+            if (sim.fxBuild > 0) {
+                sfx.play(comet::Sfx::Build);
+                sim.fxBuild = 0;
             }
         }
 
