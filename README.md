@@ -49,7 +49,7 @@ game binary itself.**
 - ✅ Input seam named: `pads_update` (0x111278) → `pads_sample` (0x110738, per-frame cellPadGetData); original proven pad-only — no built-in keyboard/mouse
 - ✅ Module map v1: corpus split into per-module files under decompiled/by-module/ (MultiStream 66, PSGL 21, local_text 9, C runtime 17, rest unassigned)
 - ✅ Language tables extracted: 265 English strings incl. all menu text (analysis/language/)
-- ✅ Data formats opened: `.pak` archive cracked + extracted (16 MP3 SFX, scripts/extract_pak.py); `.map` levels characterized (float sections incl. direction vectors) with the loader chain found (notes/RECONSTRUCTION-004.md)
+- ✅ Data formats opened: `.pak` archive cracked + extracted (16 MP3 SFX, scripts/extract_pak.py); `.map` format cracked from its parser (level_parse) and verified byte-exact on all 12 maps — native parser implements it (notes/RECONSTRUCTION-006.md)
 - ✅ Frame chain named (main → game_run → game_loop → frame_input → pads_update)
 - ✅ Native host plays the game's own SFX (extracted MP3 bank via minimp3 + SDL audio)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`

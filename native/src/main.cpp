@@ -180,19 +180,30 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
         SDL_RenderLine(r, 0, gy * cell, 16 * cell, gy * cell);
     }
     // Real level data, when a .map was loaded (COMET_MAP): draw the
-    // direction vectors the exploratory parser extracts (unit-magnitude
-    // float pairs — the map's flow-field-like section) as ticks laid
-    // out in file order, 40 per row.
-    if (level != nullptr && !dimmed && !level->vectors.empty()) {
-        SDL_SetRenderDrawColor(r, 235, 180, 90, 255);
+    // parsed records — orientation records as ticks keyed to their
+    // quaternion's first two components, object records as markers in
+    // a band below, both in file order, 40 per row.
+    if (level != nullptr && !dimmed && !level->records56.empty()) {
         const float step = cell * 0.5f;
+        SDL_SetRenderDrawColor(r, 235, 180, 90, 255);
         int i = 0;
-        for (const auto& v : level->vectors) {
+        for (const auto& rec : level->records56) {
             const float gx = (float)(i % 40) * step + step;
             const float gy = (float)(i / 40) * step + step;
-            SDL_RenderLine(r, gx, gy, gx + v[0] * step * 0.45f,
-                           gy + v[1] * step * 0.45f);
+            SDL_RenderLine(r, gx, gy, gx + rec.quat[0] * step * 0.45f,
+                           gy + rec.quat[1] * step * 0.45f);
             ++i;
+        }
+        const float bandY = (float)(i / 40 + 1) * step + step;
+        SDL_SetRenderDrawColor(r, 120, 220, 140, 255);
+        int j = 0;
+        for (const auto& rec : level->records24) {
+            (void)rec;
+            const float gx = (float)(j % 40) * step + step;
+            const float gy = bandY + (float)(j / 40) * step;
+            SDL_FRect dot{gx - 2.0f, gy - 2.0f, 4.0f, 4.0f};
+            SDL_RenderFillRect(r, &dot);
+            ++j;
         }
     }
     const float cx = frame.cursorX, cy = frame.cursorY;
@@ -219,10 +230,10 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
         }
         drawText(r, 18, H - 30.0f, 2.0f, 130, 140, 155,
                  "START: PAUSE    START+BACK: QUIT");
-        if (level != nullptr && !level->vectors.empty()) {
+        if (level != nullptr && !level->records56.empty()) {
             char buf[96];
-            std::snprintf(buf, sizeof(buf), "LEVEL VECTORS: %zu (EXPLORATORY PARSE)",
-                          level->vectors.size());
+            std::snprintf(buf, sizeof(buf), "LEVEL RECORDS: %u ORIENT + %u OBJECT (PARSED)",
+                          level->count56(), level->count24());
             drawText(r, 18, H - 56.0f, 2.0f, 235, 180, 90, buf);
         }
     }
@@ -260,8 +271,9 @@ int main(int argc, char** argv) {
     if (const char* mapPath = SDL_getenv("COMET_MAP")) {
         haveLevel = level.loadFromFile(mapPath);
         if (logFrames) {
-            SDL_Log("COMET_MAP %s: %s (%zu direction vectors)", mapPath,
-                    haveLevel ? "loaded" : "FAILED", level.vectors.size());
+            SDL_Log("COMET_MAP %s: %s (%u orient + %u object records)", mapPath,
+                    haveLevel ? "loaded" : "FAILED", level.count56(),
+                    level.count24());
         }
     }
     const comet::LevelData* levelArg = haveLevel ? &level : nullptr;

@@ -1,10 +1,10 @@
-// level_data.cpp — see level_data.h for the format state.
+// level_data.cpp — see level_data.h for the format.
 
 #include "level_data.h"
 
-#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace comet {
 namespace {
@@ -21,36 +21,39 @@ float readBEFloat(const std::uint8_t* p) {
     return f;
 }
 
-// A direction vector: both components finite and in [-1, 1], with a
-// magnitude near 1 (the stored vectors are normalized; a loose band
-// tolerates rounding and the occasional scaled entry).
-bool isDirection(float x, float y) {
-    if (!std::isfinite(x) || !std::isfinite(y)) {
-        return false;
-    }
-    if (x < -1.0f || x > 1.0f || y < -1.0f || y > 1.0f) {
-        return false;
-    }
-    const float mag = std::sqrt(x * x + y * y);
-    return mag >= 0.5f && mag <= 1.5f;
-}
-
 } // namespace
 
 bool LevelData::loadFromBuffer(const std::uint8_t* data, std::size_t size) {
-    if (data == nullptr || size < header.size() * 4) {
+    if (data == nullptr || size < kHeaderBytes) {
         return false;
     }
     for (std::size_t i = 0; i < header.size(); ++i) {
         header[i] = readBE32(data + i * 4);
     }
-    vectors.clear();
-    for (std::size_t off = header.size() * 4; off + 8 <= size; off += 8) {
-        const float x = readBEFloat(data + off);
-        const float y = readBEFloat(data + off + 4);
-        if (isDirection(x, y)) {
-            vectors.push_back({x, y});
+    const std::size_t c56 = header[0];
+    const std::size_t c24 = header[1];
+    if (size != kHeaderBytes + c56 * 56 + c24 * 24) {
+        return false;
+    }
+    records56.clear();
+    records24.clear();
+    const std::uint8_t* p = data + kHeaderBytes;
+    for (std::size_t i = 0; i < c56; ++i, p += 56) {
+        Record56 r;
+        r.type = p[0];
+        for (int k = 0; k < 4; ++k) {
+            r.quat[k] = readBEFloat(p + 4 + k * 4);
         }
+        r.field = readBE32(p + 20);
+        records56.push_back(r);
+    }
+    for (std::size_t i = 0; i < c24; ++i, p += 24) {
+        Record24 r;
+        r.value = readBEFloat(p);
+        for (int k = 0; k < 4; ++k) {
+            r.bytes[k] = p[4 + k];
+        }
+        records24.push_back(r);
     }
     return true;
 }

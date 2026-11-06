@@ -25,3 +25,8 @@ e2d78,frame_input
 # Created by DiscoverPaths.java: builds the "%slevel%u.map" path and
 # loads the level file.
 e9e7c,level_load_file
+# The dedicated level-file loader/parser (notes/RECONSTRUCTION-006.md):
+# reads the 136-byte header, then count56 x 56-byte records and
+# count24 x 24-byte records. Called only by level_load_file and
+# FUN_00154888.
+ee4d8,level_parse

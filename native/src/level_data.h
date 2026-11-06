@@ -1,14 +1,19 @@
-// level_data.h — exploratory parser for the game's .map level files.
+// level_data.h — parser for the game's .map level files.
 //
-// Verified format facts (2026-11-05, notes/RECONSTRUCTION-004.md):
-// a header of eight big-endian u32 fields, then a body of big-endian
-// float data. Large sections of the body are unit-magnitude 2D
-// direction vectors (components in [-1, 1], |v| ~= 1 — flow-field-like
-// data, mostly zero where a cell carries no direction); other values
-// run to ~800, so position-like sections exist too. The exact section
-// layout is still being pinned down from the loader code; this parser
-// extracts the direction vectors so the native host can render real
-// level data today. Header fields are exposed raw.
+// Format (cracked from FUN_000ee4d8 = level_parse; see
+// notes/RECONSTRUCTION-006.md), all big-endian:
+//
+//   header, 136 bytes:
+//     u32[0] = count56, u32[1] = count24, remaining fields undecoded
+//   count56 records of 56 bytes (orientation records):
+//     u8 type @0, quaternion (4 floats) @4, u32 field @20, rest zero
+//   count24 records of 24 bytes (object records):
+//     float @0, bytes @4..7 (incl. type @6, subtype @7), rest zero
+//
+// File size must be exactly 136 + count56*56 + count24*24 — verified
+// against all twelve shipped maps. Levels below 61 are embedded in
+// the game's data (the parser reads them from a table); the loose
+// .map files are levels 61+ and custom maps.
 
 #pragma once
 
@@ -20,12 +25,28 @@
 namespace comet {
 
 struct LevelData {
-    std::array<std::uint32_t, 8> header{};
-    // Direction vectors in file order (unit-magnitude float pairs).
-    std::vector<std::array<float, 2>> vectors;
+    static constexpr std::size_t kHeaderBytes = 136;
 
-    // Parses a whole .map file image. Returns false when the buffer is
-    // too small to hold the header.
+    std::array<std::uint32_t, kHeaderBytes / 4> header{};
+
+    struct Record56 {
+        std::uint8_t type = 0;
+        float quat[4] = {0, 0, 0, 0};
+        std::uint32_t field = 0;
+    };
+    struct Record24 {
+        float value = 0.0f;
+        std::uint8_t bytes[4] = {0, 0, 0, 0}; // @4..7; type @6, subtype @7
+    };
+
+    std::vector<Record56> records56;
+    std::vector<Record24> records24;
+
+    std::uint32_t count56() const { return header[0]; }
+    std::uint32_t count24() const { return header[1]; }
+
+    // Parses a whole .map file image, validating the exact size the
+    // header counts predict. Returns false on any mismatch.
     bool loadFromBuffer(const std::uint8_t* data, std::size_t size);
     bool loadFromFile(const char* path);
 };

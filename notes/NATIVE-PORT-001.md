@@ -138,6 +138,15 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   Point `COMET_SFX_DIR` at the extracted bank;
   `COMET_SFX_SELFTEST=1` exercises decode + playback headlessly.
 
+## Milestone 5 — real level parsing
+
+- The `.map` format is cracked (notes/RECONSTRUCTION-006.md) and
+  `native/src/level_data.*` implements it exactly: 136-byte header,
+  orientation records (type + quaternion + field), object records
+  (value + type/subtype bytes), with the header-count size check the
+  original's layout implies. The arena renders the parsed records
+  from `COMET_MAP`; all twelve shipped maps validate.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export
