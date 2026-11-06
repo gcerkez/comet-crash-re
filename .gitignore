@@ -1,0 +1,8 @@
+# Binary and engine state stay on the analysis machine (see notes/PROVENANCE.md)
+*.ELF
+*.BIN
+*.rap
+ghidra/
+*.snapshot
+analysis/*.log
+tools-dl/
