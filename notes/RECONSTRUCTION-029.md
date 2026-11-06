@@ -93,9 +93,21 @@ payoff is readability in a subset of functions — not
 worth orphaning the current corpus's carves/renames
 today. Decision left to Jerry with this evidence.
 
-## rpcs3/bninja-ps3
+## rpcs3/bninja-ps3 — no (verdict from the project page,
+supplied by Jerry after the GitLab fetch was bot-walled)
 
-(Fetch of the GitLab page was still pending when these
-notes were written; verdict appended when it lands.
-It is a Binary Ninja plugin — BN is a commercial tool
-we do not run — so expectations are reference-only.)
+Valters Tomsons' Cell PPU ELF loader for Binary Ninja
+4.x/5.x (MIT, actively maintained; GitHub mirror at
+valters-tomsons/bninja-ps3). It ships its own nids and
+syscalls data files and an AssertToc helper — but its
+Resources list shows the same lineage already harvested
+here: clienthax/Ps3GhidraScripts, RPCS3, psdevwiki,
+xerpi's nidreader gist. Nothing left for it to give:
+our import map is already 195/195. Decisive anyway:
+its own Known Issues state Binary Ninja does not lift
+many PPC instructions, and the unsupported list names
+vmaddfp, stvx, lfs/stfs/lfd/stfd, fcmpu, clrldi and
+lwarx/stwcx — precisely the families saturating our
+VMX-heavy functions (the matrix composer above all).
+Ghidra lifts those fine. Plus BN is commercial and its
+import/syscall definitions carry no arguments.
