@@ -6,3 +6,5 @@ ghidra/
 *.snapshot
 analysis/*.log
 tools-dl/
+analysis/*.status
+analysis/*.log
