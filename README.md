@@ -1,13 +1,48 @@
-# comet-crash-re
+# 🎮 Comet Crash — Reconstruction Project
 
-Reverse-engineering project: reconstructed code and logic from **Comet Crash**
-(PS3, NPUB30061, Pelfast, 2009) — a tower-defense game whose main executable
-was only available as an encrypted PS3 SELF (`EBOOT.BIN`). This repo holds the
-analysis corpus and reconstruction notes produced from the decrypted binary.
+![Comet Crash icon](assets/icon0.png)
 
-**This is a personal research project for a game I own. It contains analysis
-output (decompiled pseudocode, inventories, notes) — not the game's assets or
-the game binary itself.**
+Sony published Pelfast's **Comet Crash** for PlayStation 3 via PSN in 2009.
+It is a tower-defense game with an offensive twist: alongside building and
+upgrading towers (turrets, lasers, missiles) to stop waves of alien craft
+from reaching your base, you build up a comet of your own units and launch
+counterattacks to destroy the enemy base first. It shipped with a 28-stage
+campaign, offline co-op, and competitive multiplayer — and, very much of its
+era, a feature to record gameplay and upload it to YouTube.
+
+This repository is a **decompilation-style reconstruction project** for that
+game, modeled on the community reconstruction projects cataloged in
+[awesome-rea-games](https://github.com/HaozheH3/awesome-rea-games): start
+from the shipped binary, recover a complete decompiled corpus, then
+progressively identify, name, and document the game's logic until the
+reconstructed code reads like the program that produced it.
+
+**Private research project for a game I own. It contains analysis output
+(decompiled pseudocode, inventories, notes) — not the game's assets or the
+game binary itself.**
+
+## This project
+
+| Component | Resources | What it is |
+|---|---|---|
+| Decrypted executable | [notes/PROVENANCE.md](notes/PROVENANCE.md) | How the NPDRM SELF (`EBOOT.BIN`) was decrypted with scetool + the title's RAP into a plain PPC64 ELF — the artifact everything else is built from. |
+| Analysis corpus | [analysis/](analysis/) | Machine-generated inventories from the binary: 843 functions, 2,005 strings, memory map, plus the REA attempt records. |
+| Decompiled code | [decompiled/decompiled.c](decompiled/decompiled.c) | Ghidra decompilation of **all 843 functions** (~2.3 MB of C pseudocode). Names are `FUN_<address>` placeholders; this is reconstructed logic, not original source. |
+| Reconstruction notes | [notes/](notes/) | Human/AI findings as identification proceeds — start with [RECONSTRUCTION-001](notes/RECONSTRUCTION-001.md) (corpus tour, leaked source-file names, string-guided subsystem map). |
+| Cleaned reconstruction | [reconstruction/](reconstruction/) | Renamed, re-typed, commented code for subsystems we actually understand. Empty for now; grows from the notes. |
+| Tooling | [scripts/](scripts/) | The exact Ghidra export script used to produce the corpus, so every artifact here is reproducible. |
+
+## Reconstruction progress
+
+- ✅ Binary decrypted and verified (PPC64 ELF, entry via OPD at 0x1F2B38)
+- ✅ Full auto-analysis + decompile: **843/843 functions, 0 failures**
+- ✅ First-pass findings: leaked source files (`main.c`, `arenaGraphics.cpp`,
+  `ObjectGroup.cpp`, `sound/engine.cpp`, `local_text.cpp`,
+  `fontMapFormat.cpp`), the `gCometEnv` global, weapon/unit model taxonomy,
+  the YouTube upload feature's API key string
+- ⬜ Startup chain walked from the entry OPD to `main`
+- ⬜ PS3 SDK import stubs (FNIDs) resolved to library function names
+- ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target
 
@@ -19,50 +54,38 @@ the game binary itself.**
 | Binary | `EBOOT.BIN` → decrypted `EBOOT.ELF` |
 | Format | ELF64, big-endian, PowerPC64 (Cell PPU / LV2), statically linked, stripped |
 | Size | 2,817,600 bytes decrypted |
-| Entry point | 0x1F2B38 |
-
-## How the binary was obtained
-
-Full chain is documented in [notes/PROVENANCE.md](notes/PROVENANCE.md). Short
-version: the PSN PKG was extracted, and the NPDRM-protected SELF was decrypted
-with **scetool 0.2.9** using the title's license (RAP). The fail0verflow
-`unself` cannot handle NPDRM SELFs (key type 0x08), which is why scetool was
-needed.
+| Entry point | 0x1F2B38 (an OPD — see notes 001) |
 
 ## Pipeline
 
-1. **Decrypt** (done): scetool → `EBOOT.ELF` (verified PPC64 ELF; game strings
-   present, e.g. `gCometEnv`, `mCometObjPath`, "© 2009 Pelfast, Inc.").
-2. **Analyze** (this repo): Ghidra 12.2 headless, language
+1. **Decrypt** (done): scetool → `EBOOT.ELF`. Full chain in
+   [notes/PROVENANCE.md](notes/PROVENANCE.md).
+2. **Analyze** (done, v1 corpus): Ghidra 12.2 headless, language
    `PowerPC:BE:64:default`, auto-analysis, then a scripted export
-   (`scripts/ExportReconstruction.java`) of every function's decompiled C,
-   the function inventory, and the string table.
-3. **Reconstruct** (ongoing): read the corpus, name subsystems, and write up
-   the game's logic in `notes/` and `reconstruction/`.
+   (`scripts/ExportReconstruction.java`).
+3. **Reconstruct** (ongoing): read the corpus, name subsystems, write up
+   the game's logic in `notes/`, promote understood code to
+   `reconstruction/`.
 
 ### A note on REA
 
 REA (Reverse Engineer Anything, `rea-agents` 6.7.0) is installed on the
-analysis machine and registered with Antigravity, and its Ghidra engine is the
-same one used here — but REA 6.7.0 **rejects this target at intake**
+analysis machine and registered with Antigravity, and its Ghidra engine is
+the same one used here — but REA 6.7.0 **rejects this target at intake**
 ("unsupported ELF architecture") because its artifact layer does not support
 PowerPC64/Cell LV2 ELFs, even with `--provider ghidra`. The corpus was
-therefore produced by driving Ghidra headless directly. Details and the exact
-error record are in [notes/REA.md](notes/REA.md).
+therefore produced by driving Ghidra headless directly. Details and the
+exact error record are in [notes/REA.md](notes/REA.md).
 
 ## Repo layout
 
-- `analysis/` — machine-generated inventories: `functions.tsv`,
-  `strings.tsv`, `summary.txt`, plus the REA attempt records
-  (`rea-overview*.json`).
-- `decompiled/` — the decompiled C corpus (`decompiled.c`), Ghidra output.
-  Function names are `FUN_<address>` unless the binary carried a symbol;
-  this is reconstructed logic, not original source.
-- `notes/` — human/AI-written findings: provenance, REA notes, and
-  reconstruction write-ups as they are produced.
-- `reconstruction/` — cleaned-up, renamed, re-typed pseudocode for the
-  subsystems we actually understand (grows over time).
-- `scripts/` — the exact scripts used to produce the corpus.
+- `assets/` — the game's icon from the extracted package, for presentation.
+- `analysis/` — machine-generated inventories (`functions.tsv`,
+  `strings.tsv`, `summary.txt`) and the REA attempt records.
+- `decompiled/` — the decompiled C corpus.
+- `notes/` — provenance, REA findings, reconstruction write-ups.
+- `reconstruction/` — cleaned-up reconstructed code (grows over time).
+- `scripts/` — the scripts that produced the corpus.
 
 Not in git (kept on the analysis machine): the decrypted `EBOOT.ELF`, the
 Ghidra project database (`ghidra/`), and the RAP license file — see
@@ -73,7 +96,7 @@ Ghidra project database (`ghidra/`), and the RAP license file — see
 On the analysis machine (JerryDesktop):
 
 ```bash
-source ~/tools/env.sh   # JAVA_HOME (Temurin 21), GHIDRA_INSTALL_DIR, Node 24
+source ~/tools/env.sh   # JAVA_HOME (Temurin 25 for Ghidra 12.2), GHIDRA_INSTALL_DIR, Node 24
 ~/tools/ghidra_12.2_PUBLIC/support/analyzeHeadless ~/comet-crash-re/ghidra CometCrashRE \
   -import ~/Downloads/comet_crash_extracted/EBOOT.ELF \
   -processor PowerPC:BE:64:default -cspec default \

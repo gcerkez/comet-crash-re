@@ -17,7 +17,6 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.mem.MemoryBlock;
-import ghidra.program.util.DefinedDataIterator;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -66,9 +65,9 @@ public class ExportReconstruction extends GhidraScript {
         int stringCount = 0;
         try (BufferedWriter w = new BufferedWriter(new FileWriter(new File(outDir, "strings.tsv")))) {
             w.write("address\tlength\tvalue\n");
-            for (Data d : DefinedDataIterator.definedStrings(currentProgram)) {
+            for (Data d : currentProgram.getListing().getDefinedData(true)) {
                 Object v = d.getValue();
-                if (v == null) {
+                if (!(v instanceof String)) {
                     continue;
                 }
                 stringCount++;
