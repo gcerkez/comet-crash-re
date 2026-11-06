@@ -21,6 +21,7 @@ Usage: match_fnids.py <EBOOT.ELF> <out imports.tsv>
 """
 
 import hashlib
+import os
 import struct
 import sys
 
@@ -329,6 +330,20 @@ def va2off(va: int) -> int:
     if 0x1F0000 <= va < 0x1F0000 + 0xCCC4C:
         return 0x1E0000 + (va - 0x1F0000)
     raise ValueError(f"VA not mapped: {va:#x}")
+
+
+# Extra candidates mined from RPCS3's HLE module sources
+# (scripts/rpcs3_candidates.txt: library<TAB>name). RPCS3 implements
+# these libraries by name, so its registration tables are a
+# high-quality dictionary for the FNID hash.
+_rpc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "rpcs3_candidates.txt")
+if os.path.exists(_rpc_path):
+    for _line in open(_rpc_path):
+        _parts = _line.rstrip("\n").split("\t")
+        if len(_parts) == 2 and _parts[0] in CANDIDATES:
+            if _parts[1] not in CANDIDATES[_parts[0]].split():
+                CANDIDATES[_parts[0]] += " " + _parts[1]
 
 
 def main() -> int:
