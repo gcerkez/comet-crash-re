@@ -118,6 +118,17 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   strings don't pin down (Max Hits 1–20, volumes 0–10) are host-side
   approximations, marked as such in the native README.
 
+## Milestone 3 — real game data in the host
+
+- `data2.pak` format cracked (notes/RECONSTRUCTION-004.md):
+  `scripts/extract_pak.py` extracts all 16 MP3 sound effects — the
+  first real assets available to the port (audio milestone will play
+  them).
+- `native/src/level_data.*`: exploratory `.map` parser — the header
+  fields plus the map body's direction-vector section (unit-magnitude
+  float pairs, flow-field-like). With `COMET_MAP=<level file>` the
+  arena renders those vectors; unit-tested like the rest.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

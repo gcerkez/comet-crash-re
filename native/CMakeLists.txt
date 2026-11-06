@@ -24,7 +24,8 @@ add_executable(comet_native
   src/input_mapper.cpp
   src/sdl_input.cpp
   src/text_table.cpp
-  src/menu_model.cpp)
+  src/menu_model.cpp
+  src/level_data.cpp)
 target_link_libraries(comet_native PRIVATE SDL3::SDL3)
 if(MSVC)
   target_compile_options(comet_native PRIVATE /W4)
@@ -46,3 +47,9 @@ add_executable(menu_model_test
   src/menu_model.cpp
   src/text_table.cpp)
 add_test(NAME menu_model COMMAND menu_model_test)
+
+# Headless unit test for the exploratory .map parser (SDL-free).
+add_executable(level_data_test
+  tests/level_data_test.cpp
+  src/level_data.cpp)
+add_test(NAME level_data COMMAND level_data_test)

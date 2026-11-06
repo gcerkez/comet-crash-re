@@ -17,11 +17,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "input_mapper.h"
+#include "level_data.h"
 #include "menu_model.h"
 #include "sdl_input.h"
 #include "text_table.h"
@@ -165,7 +167,8 @@ void drawItemList(SDL_Renderer* r, float W, float H, const comet::Screen& s) {
 }
 
 void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
-               const InputFrame& frame, bool dimmed) {
+               const InputFrame& frame, bool dimmed,
+               const comet::LevelData* level) {
     // Placeholder arena: grid + ship cursor, as in milestone 1.
     const float cell = H / 12.0f;
     SDL_SetRenderDrawColor(r, dimmed ? 18 : 30, dimmed ? 22 : 38, dimmed ? 30 : 52, 255);
@@ -174,6 +177,22 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
     }
     for (int gy = 0; gy <= 12; gy++) {
         SDL_RenderLine(r, 0, gy * cell, 16 * cell, gy * cell);
+    }
+    // Real level data, when a .map was loaded (COMET_MAP): draw the
+    // direction vectors the exploratory parser extracts (unit-magnitude
+    // float pairs — the map's flow-field-like section) as ticks laid
+    // out in file order, 40 per row.
+    if (level != nullptr && !dimmed && !level->vectors.empty()) {
+        SDL_SetRenderDrawColor(r, 235, 180, 90, 255);
+        const float step = cell * 0.5f;
+        int i = 0;
+        for (const auto& v : level->vectors) {
+            const float gx = (float)(i % 40) * step + step;
+            const float gy = (float)(i / 40) * step + step;
+            SDL_RenderLine(r, gx, gy, gx + v[0] * step * 0.45f,
+                           gy + v[1] * step * 0.45f);
+            ++i;
+        }
     }
     const float cx = frame.cursorX, cy = frame.cursorY;
     const bool held = (frame.buttons & BtnConfirm) != 0;
@@ -199,6 +218,12 @@ void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
         }
         drawText(r, 18, H - 30.0f, 2.0f, 130, 140, 155,
                  "START: PAUSE    START+BACK: QUIT");
+        if (level != nullptr && !level->vectors.empty()) {
+            char buf[96];
+            std::snprintf(buf, sizeof(buf), "LEVEL VECTORS: %zu (EXPLORATORY PARSE)",
+                          level->vectors.size());
+            drawText(r, 18, H - 56.0f, 2.0f, 235, 180, 90, buf);
+        }
     }
 }
 
@@ -229,6 +254,16 @@ int main(int argc, char** argv) {
     SdlInput sdlInput;
     InputMapper mapper;
     comet::MenuModel model;
+    comet::LevelData level;
+    bool haveLevel = false;
+    if (const char* mapPath = SDL_getenv("COMET_MAP")) {
+        haveLevel = level.loadFromFile(mapPath);
+        if (logFrames) {
+            SDL_Log("COMET_MAP %s: %s (%zu direction vectors)", mapPath,
+                    haveLevel ? "loaded" : "FAILED", level.vectors.size());
+        }
+    }
+    const comet::LevelData* levelArg = haveLevel ? &level : nullptr;
     bool running = true;
     long frameNo = 0;
     Uint64 lastTicks = SDL_GetTicks();
@@ -263,7 +298,7 @@ int main(int argc, char** argv) {
         const comet::Screen& cur = model.current();
 
         if (model.arenaBehind() && cur.id != comet::ScreenId::Arena) {
-            drawArena(renderer, W, H, model, frame, true);
+            drawArena(renderer, W, H, model, frame, true, levelArg);
             comet::FloatRect panel = comet::MenuModel::panelRect(W, H);
             SDL_SetRenderDrawColor(renderer, 12, 16, 26, 235);
             SDL_FRect pf{panel.x, panel.y, panel.w, panel.h};
@@ -275,7 +310,7 @@ int main(int argc, char** argv) {
             drawTextCentered(renderer, W * 0.5f, panel.y + 18, 3.0f, 240, 200, 90, title);
             drawItemList(renderer, W, H, cur);
         } else if (cur.id == comet::ScreenId::Arena) {
-            drawArena(renderer, W, H, model, frame, false);
+            drawArena(renderer, W, H, model, frame, false, levelArg);
         } else if (cur.id == comet::ScreenId::Title) {
             drawTextCentered(renderer, W * 0.5f, H * 0.30f, 6.0f, 240, 200, 90,
                              cur.titleLiteral);

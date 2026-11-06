@@ -13,3 +13,15 @@ dae30,main
 # Per-frame input update: calls the cellPadGetInfo2 thunk (connection
 # state) and pads_sample.
 111278,pads_update
+# Frame chain found 2026-11-05 (see notes/RECONSTRUCTION-004.md):
+# main calls game_run once in its run phase; game_run calls game_loop;
+# game_loop is the large per-frame driver that reaches frame_input,
+# which calls pads_update.
+d8894,game_run
+e36e0,game_loop
+# The frame step whose callees are pads_update plus a few input-adjacent
+# helpers.
+e2d78,frame_input
+# Created by DiscoverPaths.java: builds the "%slevel%u.map" path and
+# loads the level file.
+e9e7c,level_load_file
