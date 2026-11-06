@@ -18,6 +18,14 @@ table (below).
 | Boot / entry | ELF entry is an OPD → code at `0x10230`, TOC `0x1FC7C0` | `native/src/main.cpp` (later: `boot/`) |
 | Game environment | global `gCometEnv` (`0x180390`); `mCometObjPath` | reconstructed core, TBD |
 | Arena rendering | `arenaGraphics.cpp`; PSGL (OpenGL ES-CM 1.0) statically linked over `cellGcmSys` | SDL + OpenGL (milestone: PSGL-shaped shim) |
+
+Render-path status (notes/RECONSTRUCTION-008.md): all 36 cellGcmSys
+imports are named (via RPCS3's HLE tables), and the frame chain is
+traced to the present step — `frame_present` (cellResc convert+flip /
+raw GCM flip) called from the render step under `game_loop`. RPCS3's
+RSX shader decompiler is the reference for turning the game's
+compiled Cg programs (.fpo/.vpo) into GLSL if an effect needs it;
+otherwise shaders are replaced by role (font, gui_quad, ...).
 | Objects / scene | `ObjectGroup.cpp`; `.obj` model trees under `models/care/...` | asset pipeline + scene module |
 | Sound | `sound/engine.cpp`; Sony **MultiStream** (`cellMS*`, ~90 functions) statically linked over `cellAudio` | SDL audio / a MultiStream-shaped mixer |
 | Text / i18n | `local_text.cpp`, `fontMapFormat.cpp`; `language1..13.utf` | text module; the .utf format needs decoding |
