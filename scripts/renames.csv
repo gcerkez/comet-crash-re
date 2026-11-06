@@ -69,3 +69,5 @@ fed30,hud_drawFrame
 fc1a0,scene_submitDraw
 e5808,arena_enterInit
 17de0,psgl_loadMatrixf
+135170,gui_setWidgetSprite
+159d48,gui_resolveSpriteSize
