@@ -223,6 +223,19 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   models textured, structures and rocks as artwork billboards,
   cometGaseous ground. HUD fits on two lines. Notes 016.
 
+## Milestone 13 — full-asset rewire
+
+- The scene composes the base game's named models (recovered
+  in notes 017): the four comet terrains by the level's world
+  index, articulated turret/laser/missile parts on platforms,
+  barracks, base shell, tesla, gateway, beacon; geode Thorium
+  rocks; terrain rocks placed with their records' quaternions.
+  data1.pak opened (soundtrack + the full SFX library).
+  COMET_SCREENSHOT captures frames headlessly. The original's
+  asset registry turns out to be one big static struct
+  (0x1F60xx-0x1F64xx); tracing its consumers is the next
+  corpus job. Notes 018.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export
