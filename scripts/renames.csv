@@ -33,3 +33,17 @@ ee4d8,level_parse
 00079800,frame_present
 000ac00c,gcm_flip
 f6990,op_dispatch
+1978c,psgl_bindTexture
+1a814,psgl_texParameterf
+1a35c,psgl_texParameteri
+198b8,psgl_texImage2D
+25408,psgl_bindFramebuffer
+25700,psgl_framebufferTexture2D
+20218,psgl_viewport
+175b8,psgl_matrixMode
+17f10,psgl_loadIdentity
+175c8,psgl_ortho
+18380,psgl_drawArrays
+11320,psgl_enable
+fcebc,arena_createRenderTargets
+fdf00,arena_postChain
