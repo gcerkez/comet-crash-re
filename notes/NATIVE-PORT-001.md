@@ -250,6 +250,17 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   found in the uncarved mission-setup hub; carving and
   reading it is next. Notes 019.
 
+## Milestone 15 — corpus completion (boundary-free recovery)
+
+- The 868-function corpus covered only 33% of the code
+  segment. A boundary-free census + carve (OPD table entries,
+  call targets, prologues) recovered the rest: **corpus v3 =
+  2,646 functions, all decompiled, 91.2% coverage**. The
+  "mission-setup hub" resolved into **op_dispatch**, a
+  101-way jump-table dispatcher, plus its 69 handler
+  functions — the asset registry's real consumers, and the
+  route by which levels load per mode. Notes 020.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

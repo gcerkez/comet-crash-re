@@ -32,3 +32,4 @@ e9e7c,level_load_file
 ee4d8,level_parse
 00079800,frame_present
 000ac00c,gcm_flip
+f6990,op_dispatch
