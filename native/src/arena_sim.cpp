@@ -77,6 +77,10 @@ void ArenaSim::reset(const LevelData* level) {
                 continue; // extent and base markers are not structures
             }
             SimStructure s;
+            s.quat[0] = r.quat[0];
+            s.quat[1] = r.quat[1];
+            s.quat[2] = r.quat[2];
+            s.quat[3] = r.quat[3];
             s.x = (float)r.b2;
             s.y = (float)r.b3;
             s.kind = r.type;

@@ -64,6 +64,7 @@ struct SimStructure {
     int hp = 3;
     float timer = 0.0f;   // build / production clock
     bool rock = false;
+    float quat[4] = {0, 0, 0, 1}; // placement orientation (records)
     int pending = 0;      // produced units awaiting deployment
     float deployTimer = 0.0f;
     int producedKind = 40; // next unit kind to deploy (40..47)

@@ -230,6 +230,14 @@ bool project(const Camera& c, float W, float H, Vec3f p, float& sx, float& sy,
     return true;
 }
 
+// One named model from the game's registry, with its texture.
+struct MeshSlot {
+    comet::ObjModel model;
+    SDL_Texture* tex = nullptr;
+    bool ok = false;
+    float span = 1.0f; // approx. world size before scaling (2*radius)
+};
+
 // The game's artwork, resolved from the model directory at start.
 struct SceneAssets {
     comet::ObjModel scout;
@@ -238,7 +246,14 @@ struct SceneAssets {
     SDL_Texture* scoutTex = nullptr;
     SDL_Texture* groundTex = nullptr;
     SDL_Texture* rockTex = nullptr;
-    SDL_Texture* structTex[29] = {}; // by structure kind
+    SDL_Texture* structTex[29] = {}; // by structure kind (billboard fallback)
+    // The full registry (base-game package), composed as meshes.
+    MeshSlot terrain[4]; // gaseous, ice, lava, rock (header world idx)
+    MeshSlot turretStand, turretBarrel, laserStand, laserBarrel;
+    MeshSlot missileStand, missileBarrels, barracksBasic, barracksAdv;
+    MeshSlot baseShell, tesla, gateway, beaconLamp, platBasic;
+    MeshSlot geode, rockA, beetle, flyer, scoutMesh;
+    MeshSlot agentMedic, agentCarrier, agentLaser;
 };
 
 std::string dirOf(const std::string& p) {
@@ -286,8 +301,24 @@ std::string mtlTexturePath(const std::string& objPath) {
                     name.back() == ' ')) {
                 name.pop_back();
             }
+            // Some .mtl files carry absolute paths from the
+            // developer's machine (/home/jbates/pelfast/...);
+            // only the file name is meaningful here.
+            const std::size_t slash = name.find_last_of("/\\");
+            if (slash != std::string::npos) {
+                name = name.substr(slash + 1);
+            }
             if (!name.empty()) {
                 found = dirOf(objPath) + "/" + name;
+                // Several .mtl files name .tif sources; the shipped
+                // textures are the same stems as .dds.
+                std::FILE* probe = std::fopen(found.c_str(), "rb");
+                if (probe == nullptr && found.size() > 4 &&
+                    found.substr(found.size() - 4) == ".tif") {
+                    found = found.substr(0, found.size() - 4) + ".dds";
+                } else if (probe != nullptr) {
+                    std::fclose(probe);
+                }
                 break;
             }
         }
@@ -327,8 +358,46 @@ void buildSceneAssets(SDL_Renderer* r, const std::string& modelPath,
     S(25, "/models/care/converter_DC.dds");              // Gateway
     S(26, "/models/care/structures/structBeacon_DC.dds"); // Basic Ops
     S(28, "/models/care/structures/structBeacon_DC.dds"); // Special Ops
-    SDL_Log("scene assets: shipTex=%d scout=%d groundTex=%d",
-            A.shipTex != nullptr, (int)A.haveScout, A.groundTex != nullptr);
+    // The full model registry from the base-game package.
+    auto loadMesh = [&r, &dataRoot](MeshSlot& slot, const char* rel) {
+        const std::string path = dataRoot + rel;
+        if (slot.model.loadFromFile(path.c_str())) {
+            slot.ok = true;
+            slot.span = slot.model.radius > 0 ? 2.0f * slot.model.radius : 1.0f;
+            const std::string tp = mtlTexturePath(path);
+            if (!tp.empty()) {
+                slot.tex = loadDdsTexture(r, tp);
+            }
+        }
+    };
+    loadMesh(A.terrain[0], "/models/care/cometGaseous/cometGaseous.obj");
+    loadMesh(A.terrain[1], "/models/care/cometIce/cometIce.obj");
+    loadMesh(A.terrain[2], "/models/care/cometLava/lavaComet.obj");
+    loadMesh(A.terrain[3], "/models/care/cometRock_03/cometRock.obj");
+    loadMesh(A.turretStand, "/models/care/weapons/structTurretStand.obj");
+    loadMesh(A.turretBarrel, "/models/care/weapons/structTurretBarrel.obj");
+    loadMesh(A.laserStand, "/models/care/weapons/structLaserStand.obj");
+    loadMesh(A.laserBarrel, "/models/care/weapons/structLaserBarrel.obj");
+    loadMesh(A.missileStand, "/models/care/weapons/structMissileStand.obj");
+    loadMesh(A.missileBarrels, "/models/care/weapons/structMissileBarrels.obj");
+    loadMesh(A.barracksBasic, "/models/care/structures/structBarracksBasic.obj");
+    loadMesh(A.barracksAdv, "/models/care/structures/structBarracksAdv.obj");
+    loadMesh(A.baseShell, "/models/structBaseShell.obj");
+    loadMesh(A.tesla, "/models/structTesla.obj");
+    loadMesh(A.gateway, "/models/gateway.obj");
+    loadMesh(A.beaconLamp, "/models/care/structures/structBeaconLamp.obj");
+    loadMesh(A.platBasic, "/models/care/platforms/platBasic.obj");
+    loadMesh(A.geode, "/models/care/resourceGeode/resourceGeode.obj");
+    loadMesh(A.rockA, "/models/care/rockA.obj");
+    loadMesh(A.beetle, "/models/care/agents/beetle.obj");
+    loadMesh(A.flyer, "/models/care/agents/flyer.obj");
+    loadMesh(A.scoutMesh, "/models/care/scout02.obj");
+    loadMesh(A.agentMedic, "/models/care/agents/agentAdv_Medic.obj");
+    loadMesh(A.agentCarrier, "/models/care/agents/agentAdv_Carrier.obj");
+    loadMesh(A.agentLaser, "/models/care/agents/agentAdv_Laser.obj");
+    SDL_Log("scene assets: shipTex=%d scout=%d groundTex=%d terrain=%d turret=%d geode=%d",
+            A.shipTex != nullptr, (int)A.haveScout, A.groundTex != nullptr,
+            (int)A.terrain[0].ok, (int)A.turretStand.ok, (int)A.geode.ok);
 }
 
 // A painter-sorted sink of projected, textured triangles.
@@ -369,11 +438,30 @@ struct TriSink {
     }
 
     // A textured OBJ model placed in the world (lambert-shaded,
-    // vertex color = tint x shade).
+    // vertex color = tint x shade). Rotation is a yaw, or a full
+    // quaternion (x,y,z,w) when quat is given — level records
+    // orient placed content with quaternions.
     void addModel(SDL_Texture* tex, const Camera& cam, float W, float H,
                   const comet::ObjModel& obj, float wx, float wy, float wz,
-                  float yaw, float scale, SDL_FColor tint) {
-        const float cs = std::cos(yaw), sn = std::sin(yaw);
+                  float yaw, const float* quat, float scale, SDL_FColor tint) {
+        float R[3][3];
+        if (quat != nullptr) {
+            const float x = quat[0], y = quat[1], z = quat[2], w = quat[3];
+            R[0][0] = 1 - 2 * (y * y + z * z);
+            R[0][1] = 2 * (x * y - z * w);
+            R[0][2] = 2 * (x * z + y * w);
+            R[1][0] = 2 * (x * y + z * w);
+            R[1][1] = 1 - 2 * (x * x + z * z);
+            R[1][2] = 2 * (y * z - x * w);
+            R[2][0] = 2 * (x * z - y * w);
+            R[2][1] = 2 * (y * z + x * w);
+            R[2][2] = 1 - 2 * (x * x + y * y);
+        } else {
+            const float cs = std::cos(yaw), sn = std::sin(yaw);
+            R[0][0] = cs;  R[0][1] = 0; R[0][2] = -sn;
+            R[1][0] = 0;   R[1][1] = 1; R[1][2] = 0;
+            R[2][0] = sn;  R[2][1] = 0; R[2][2] = cs;
+        }
         const Vec3f light = vnorm({0.5f, 0.8f, 0.3f});
         for (std::size_t ti = 0; ti < obj.triangles.size(); ++ti) {
             const auto& tr = obj.triangles[ti];
@@ -381,9 +469,9 @@ struct TriSink {
             SDL_FPoint uv[3];
             for (int k = 0; k < 3; ++k) {
                 const auto& p = obj.positions[tr.v[k]];
-                wp[k] = {p[0] * scale * cs - p[2] * scale * sn + wx,
-                         p[1] * scale + wy,
-                         p[0] * scale * sn + p[2] * scale * cs + wz};
+                wp[k] = {(p[0] * R[0][0] + p[1] * R[0][1] + p[2] * R[0][2]) * scale + wx,
+                         (p[0] * R[1][0] + p[1] * R[1][1] + p[2] * R[1][2]) * scale + wy,
+                         (p[0] * R[2][0] + p[1] * R[2][1] + p[2] * R[2][2]) * scale + wz};
                 if (tex != nullptr && tr.t[k] >= 0 &&
                     tr.t[k] < (int)obj.uvs.size()) {
                     const auto& t2 = obj.uvs[tr.t[k]];
@@ -393,8 +481,9 @@ struct TriSink {
                 }
             }
             const auto& fn = obj.faceNormals[ti];
-            const Vec3f n{fn[0] * cs - fn[2] * sn, fn[1],
-                          fn[0] * sn + fn[2] * cs};
+            const Vec3f n{fn[0] * R[0][0] + fn[1] * R[0][1] + fn[2] * R[0][2],
+                          fn[0] * R[1][0] + fn[1] * R[1][1] + fn[2] * R[1][2],
+                          fn[0] * R[2][0] + fn[1] * R[2][1] + fn[2] * R[2][2]};
             float lam = vdot(n, light);
             if (lam < 0) {
                 lam = -lam * 0.6f;
@@ -440,121 +529,186 @@ float cellHash(int x, int z) {
 void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
                  const comet::LevelData* level, double t,
                  const comet::ArenaSim* sim, const SceneAssets& A) {
-    float extent = 12.0f; // half-extent in world units (1 cell = 1 unit)
+    // World scale: the comet terrains span ~36 native units for a
+    // 24-cell arena, so 1 cell = 1.5 world units. (Constant to be
+    // confirmed against the original's render code; the registry
+    // struct hunt is noted in RECONSTRUCTION-018.)
+    const float WPC = 1.5f;
+    int extentCells = 24;
     if (level != nullptr) {
-        extent = (float)level->extent * 0.5f;
+        extentCells = level->extent;
     }
-    const Camera cam = makeCamera(W, H, extent);
+    if (sim != nullptr) {
+        extentCells = sim->extentCells;
+    }
+    const float halfWorld = extentCells * 0.5f * WPC;
+    const Camera cam = makeCamera(W, H, halfWorld);
     TriSink sink;
+    auto toWorld = [&](float simCoord) { return (simCoord - extentCells * 0.5f) * WPC; };
 
-    // Ground: one textured quad per cell (the comet surface art,
-    // repeated) with per-cell tint variation, over a dark apron.
-    const int cells = (int)(extent * 2.0f);
-    sink.addQuad(nullptr, cam, W, H, {-extent - 2, -0.05f, -extent - 2},
-                 {extent + 2, -0.05f, -extent - 2},
-                 {extent + 2, -0.05f, extent + 2},
-                 {-extent - 2, -0.05f, extent + 2},
-                 {0.03f, 0.04f, 0.06f, 1.0f});
-    for (int gz = 0; gz < cells; ++gz) {
-        for (int gx = 0; gx < cells; ++gx) {
-            const float x0 = gx - extent, z0 = gz - extent;
-            const float v = 0.55f + 0.40f * cellHash(gx, gz);
-            const SDL_FColor col = A.groundTex != nullptr
-                                       ? SDL_FColor{v, v, v * 0.96f, 1.0f}
-                                       : SDL_FColor{0.05f * v + 0.05f,
-                                                    0.08f * v + 0.06f,
-                                                    0.13f * v + 0.08f, 1.0f};
-            sink.addQuad(A.groundTex, cam, W, H, {x0, 0, z0}, {x0 + 1, 0, z0},
-                         {x0 + 1, 0, z0 + 1}, {x0, 0, z0 + 1}, col);
+    // Terrain: the comet's own sculpted mesh (chosen by the level
+    // header's world index), textured with its 2048px surface.
+    const MeshSlot* terrain = &A.terrain[0];
+    if (level != nullptr) {
+        const unsigned world = (level->header[2] >> 16) & 0xFFFFu;
+        if (world < 4 && A.terrain[world].ok) {
+            terrain = &A.terrain[world];
         }
+    }
+    if (terrain->ok) {
+        const float sc = (extentCells * WPC) / terrain->span;
+        sink.addModel(terrain->tex, cam, W, H, terrain->model, 0, -0.05f, 0,
+                      0.0f, nullptr, sc, {1, 1, 1, 1});
+    } else {
+        // Fallback: flat dark field.
+        sink.addQuad(nullptr, cam, W, H, {-halfWorld, 0, -halfWorld},
+                     {halfWorld, 0, -halfWorld}, {halfWorld, 0, halfWorld},
+                     {-halfWorld, 0, halfWorld}, {0.05f, 0.07f, 0.11f, 1.0f});
     }
 
     if (sim != nullptr) {
-        const float half = sim->extentCells * 0.5f;
-        // Base pads.
-        auto basePad = [&](float bx, float bz, bool player) {
-            const float cx = bx - half, cz = bz - half;
+        // Base pads + the base shell mesh.
+        auto baseAt = [&](float bx, float bz, bool player) {
+            const float cx = toWorld(bx), cz = toWorld(bz);
             const SDL_FColor col = player ? SDL_FColor{0.10f, 0.45f, 0.42f, 1}
                                           : SDL_FColor{0.50f, 0.14f, 0.10f, 1};
-            sink.addQuad(nullptr, cam, W, H, {cx - 0.8f, 0.02f, cz - 0.8f},
-                         {cx + 0.8f, 0.02f, cz - 0.8f},
-                         {cx + 0.8f, 0.02f, cz + 0.8f},
-                         {cx - 0.8f, 0.02f, cz + 0.8f}, col);
-            sink.addBillboard(A.structTex[20], cam, W, H, cx, cz, 0.0f, 1.6f,
-                              1.25f, {1, 1, 1, 1});
+            sink.addQuad(nullptr, cam, W, H, {cx - 1.1f, 0.02f, cz - 1.1f},
+                         {cx + 1.1f, 0.02f, cz - 1.1f},
+                         {cx + 1.1f, 0.02f, cz + 1.1f},
+                         {cx - 1.1f, 0.02f, cz + 1.1f}, col);
+            if (A.baseShell.ok) {
+                const float sc = 2.3f / A.baseShell.span;
+                // The shell's shipped texture reference is a
+                // developer-path team-lines overlay; the shell is
+                // presented in team colour.
+                const SDL_FColor tint = player
+                                            ? SDL_FColor{0.45f, 0.95f, 0.88f, 1}
+                                            : SDL_FColor{1.0f, 0.52f, 0.38f, 1};
+                sink.addModel(A.baseShell.tex, cam, W, H, A.baseShell.model,
+                              cx, 0.0f, cz, 0.0f, nullptr, sc, tint);
+            }
         };
-        basePad(sim->playerBaseX, sim->playerBaseZ, true);
-        basePad(sim->enemyBaseX, sim->enemyBaseZ, false);
+        baseAt(sim->playerBaseX, sim->playerBaseZ, true);
+        baseAt(sim->enemyBaseX, sim->enemyBaseZ, false);
 
-        // Placed content: terrain rocks and structures as billboards
-        // with the game's artwork.
+        // Placed content: real meshes, composed as the registry
+        // names them (stand + barrel parts, platforms under sites).
         for (const auto& s : sim->structures) {
-            const float cx = s.x + 0.5f - half, cz = s.y + 0.5f - half;
+            const float cx = toWorld(s.x + 0.5f), cz = toWorld(s.y + 0.5f);
             if (s.rock) {
-                sink.addBillboard(A.rockTex, cam, W, H, cx, cz, 0.0f, 1.3f,
-                                  1.05f, {0.62f, 0.57f, 0.50f, 1.0f});
+                if (A.rockA.ok) {
+                    const float sc = 1.5f / A.rockA.span;
+                    sink.addModel(A.rockA.tex, cam, W, H, A.rockA.model, cx,
+                                  0.0f, cz, 0.0f, s.quat, sc,
+                                  {0.85f, 0.82f, 0.78f, 1.0f});
+                }
                 continue;
             }
             if (s.kind < 20 || s.kind > 28) {
                 continue;
             }
-            SDL_Texture* tex = A.structTex[s.kind];
-            float wdt = 1.05f, hgt = 1.0f;
-            if (s.kind == 20) {
-                wdt = 1.5f;
-                hgt = 1.2f;
-            } else if (s.kind == 26 || s.kind == 28) {
-                wdt = 1.25f;
-                hgt = 1.1f;
-            }
             SDL_FColor col;
-            if (s.state == 0) { // dormant site: low, dark silhouette
-                hgt *= 0.5f;
-                col = {0.38f, 0.38f, 0.44f, 1.0f};
-            } else if (s.state == 1) { // building: pulse
+            if (s.state == 0) {
+                col = {0.45f, 0.45f, 0.52f, 1.0f};
+            } else if (s.state == 1) {
                 const float p = 0.8f + 0.2f * std::sin((float)t * 6.0f);
                 col = {p, p, p, 1.0f};
-            } else { // active: side tint
-                col = s.owner == 1 ? SDL_FColor{0.78f, 1.0f, 0.96f, 1.0f}
-                                    : SDL_FColor{1.0f, 0.80f, 0.68f, 1.0f};
+            } else {
+                col = s.owner == 1 ? SDL_FColor{0.82f, 1.0f, 0.97f, 1.0f}
+                                   : SDL_FColor{1.0f, 0.84f, 0.72f, 1.0f};
             }
-            sink.addBillboard(tex, cam, W, H, cx, cz, 0.0f, wdt, hgt, col);
+            // Every site sits on a platform (platBasic/platAdv).
+            if (A.platBasic.ok) {
+                const float sc = 1.5f / A.platBasic.span;
+                sink.addModel(A.platBasic.tex, cam, W, H, A.platBasic.model,
+                              cx, 0.0f, cz, 0.0f, nullptr, sc, col);
+            }
+            if (s.state == 0) {
+                continue; // dormant: just the platform
+            }
+            auto part = [&](const MeshSlot& slot, float y, float targetSpan) {
+                if (!slot.ok) {
+                    return;
+                }
+                const float sc = targetSpan / slot.span;
+                sink.addModel(slot.tex, cam, W, H, slot.model, cx, y, cz, 0.0f,
+                              nullptr, sc, col);
+            };
+            switch (s.kind) {
+                case 20: part(A.baseShell, 0, 2.0f); break;
+                case 21:
+                    part(A.turretStand, 0.1f, 1.3f);
+                    part(A.turretBarrel, 0.85f, 1.3f);
+                    break;
+                case 22: part(A.tesla, 0.1f, 1.3f); break;
+                case 23:
+                    part(A.laserStand, 0.1f, 1.3f);
+                    part(A.laserBarrel, 0.85f, 1.3f);
+                    break;
+                case 24:
+                    part(A.missileStand, 0.1f, 1.3f);
+                    part(A.missileBarrels, 0.75f, 1.3f);
+                    break;
+                case 25: part(A.gateway, 0.1f, 1.4f); break;
+                case 26: part(A.barracksBasic, 0.1f, 1.45f); break;
+                case 27: part(A.beaconLamp, 0.1f, 1.1f); break;
+                case 28: part(A.barracksAdv, 0.1f, 1.45f); break;
+                default: break;
+            }
         }
 
-        // Units: the scout model (textured); flying rocks billboarded.
+        // Units: their own meshes (ground kinds low, air kinds up).
         for (const auto& e : sim->entities) {
-            const float wx = e.x - half, wz = e.y - half;
-            if (e.kind == 90) {
-                sink.addBillboard(A.rockTex, cam, W, H, wx, wz, 0.15f, 0.85f,
-                                  0.8f, {1.0f, 1.0f, 1.0f, 1.0f});
+            const float wx = toWorld(e.x), wz = toWorld(e.y);
+            if (e.kind == 90) { // a flying Thorium geode
+                if (A.geode.ok) {
+                    const float sc = 1.05f / A.geode.span;
+                    sink.addModel(A.geode.tex, cam, W, H, A.geode.model, wx,
+                                  0.8f, wz, (float)t * 1.5f + e.x, nullptr, sc,
+                                  {1, 1, 1, 1});
+                }
                 continue;
             }
             const SDL_FColor tint = e.playerOwned
-                                        ? SDL_FColor{0.72f, 1.0f, 0.96f, 1.0f}
-                                        : SDL_FColor{1.0f, 0.80f, 0.68f, 1.0f};
-            if (A.haveScout) {
-                float yaw = e.playerOwned ? -1.5708f : 1.5708f;
-                if (e.pathIdx < (int)e.path.size()) {
-                    const float dx = e.path[e.pathIdx].first - e.x;
-                    const float dz = e.path[e.pathIdx].second - e.y;
-                    if (dx * dx + dz * dz > 0.0001f) {
-                        yaw = std::atan2(dz, dx);
-                    }
+                                        ? SDL_FColor{0.78f, 1.0f, 0.97f, 1.0f}
+                                        : SDL_FColor{1.0f, 0.84f, 0.72f, 1.0f};
+            const MeshSlot* slot = &A.scoutMesh;
+            bool air = false;
+            switch (e.kind) {
+                case 40: slot = &A.scoutMesh; break;
+                case 41: slot = &A.beetle; break;
+                case 42: slot = &A.flyer; air = true; break;
+                case 43: slot = &A.flyer; air = true; break;
+                case 44: slot = &A.beetle; break;
+                case 45: slot = &A.agentMedic; break;
+                case 46: slot = &A.agentLaser; break;
+                case 47: slot = &A.agentCarrier; air = true; break;
+                default: slot = &A.beetle; break;
+            }
+            float yaw = e.playerOwned ? -1.5708f : 1.5708f;
+            if (e.pathIdx < (int)e.path.size()) {
+                const float dx = e.path[e.pathIdx].first + 0.5f - e.x;
+                const float dz = e.path[e.pathIdx].second + 0.5f - e.y;
+                if (dx * dx + dz * dz > 0.0001f) {
+                    yaw = std::atan2(dz, dx);
                 }
-                const float sc = A.scout.radius > 0 ? 0.5f / A.scout.radius : 1;
-                sink.addModel(A.scoutTex, cam, W, H, A.scout, wx, 0.30f, wz,
-                              yaw, sc, tint);
-            } else {
-                sink.addBillboard(A.scoutTex, cam, W, H, wx, wz, 0.0f, 0.8f,
-                                  0.7f, tint);
+            }
+            if (slot->ok) {
+                const float sc = 1.2f / slot->span;
+                sink.addModel(slot->tex, cam, W, H, slot->model, wx,
+                              air ? 0.9f : 0.10f, wz, yaw, nullptr, sc, tint);
+            } else if (A.haveScout) {
+                const float sc = 0.5f / A.scout.radius;
+                sink.addModel(A.scoutTex, cam, W, H, A.scout, wx, 0.3f, wz,
+                              yaw, nullptr, sc, tint);
             }
         }
 
-        // The player's ship: the fighter model with its own texture.
+        // The player's ship (COMET_MODEL: playerShip.obj).
         if (sim->shipAlive && !obj.empty()) {
-            const float sc = obj.radius > 0 ? 0.85f / obj.radius : 1.0f;
-            sink.addModel(A.shipTex, cam, W, H, obj, sim->shipX - half, 0.55f,
-                          sim->shipY - half, sim->shipYaw, sc,
+            const float sc = obj.radius > 0 ? 1.5f / (2.0f * obj.radius) : 1.0f;
+            sink.addModel(A.shipTex, cam, W, H, obj, toWorld(sim->shipX),
+                          0.7f, toWorld(sim->shipY), sim->shipYaw, nullptr, sc,
                           {1.0f, 1.0f, 1.0f, 1.0f});
         }
     }
@@ -562,12 +716,11 @@ void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
 
     // Shots on top.
     if (sim != nullptr) {
-        const float half = sim->extentCells * 0.5f;
         SDL_SetRenderDrawColor(r, 255, 230, 150, 255);
         for (const auto& s2 : sim->shots) {
             float sx, sy, dep;
-            if (project(cam, W, H, {s2.x - half, 0.8f, s2.y - half}, sx, sy,
-                        dep)) {
+            if (project(cam, W, H,
+                        {toWorld(s2.x), 0.9f, toWorld(s2.y)}, sx, sy, dep)) {
                 SDL_RenderPoint(r, sx, sy);
             }
         }
@@ -865,6 +1018,14 @@ int main(int argc, char** argv) {
         }
 
         SDL_RenderPresent(renderer);
+        if (const char* shotPath = SDL_getenv("COMET_SCREENSHOT")) {
+            if (maxFrames > 0 && frameNo == maxFrames - 1) {
+                if (SDL_Surface* surf = SDL_RenderReadPixels(renderer, nullptr)) {
+                    SDL_SaveBMP(surf, shotPath);
+                    SDL_DestroySurface(surf);
+                }
+            }
+        }
         frameNo++;
         if (logFrames && frameNo % 60 == 0) {
             SDL_Log("frame %ld screen=%d selected=%d buttons=%08x cursor=%.0f,%.0f",
