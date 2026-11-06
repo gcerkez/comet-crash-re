@@ -147,6 +147,19 @@ Player 1 only so far; the model extends to 4P by sampling per pad.
   original's layout implies. The arena renders the parsed records
   from `COMET_MAP`; all twelve shipped maps validate.
 
+## Milestone 6 — 3D scene: the game's own geometry, rendered natively
+
+- `native/src/obj_model.*`: Wavefront OBJ loader (the shipped models
+  are v/vt/vn triangle meshes; fighter02 = 16 verts / 28 tris),
+  unit-tested.
+- The arena now renders a projected 3D scene (CPU projection +
+  SDL_RenderGeometry — the stand-in where a desktop-GL backend will
+  sit, per the PSGL mapping in notes/RECONSTRUCTION-007.md): ground
+  grid sized from the level header, the loaded model lambert-shaded
+  and painter-sorted under an orbiting camera. `COMET_MODEL=<obj>`
+  picks the model; `COMET_START_ARENA=1` boots straight into the
+  arena for headless smoke tests.
+
 ## Roadmap
 
 1. **FNID pass** — name the 195 imports in the Ghidra project; re-export

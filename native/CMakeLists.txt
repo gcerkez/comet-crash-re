@@ -27,7 +27,8 @@ add_executable(comet_native
   src/menu_model.cpp
   src/level_data.cpp
   src/sfx_player.cpp
-  src/mp3_decode.cpp)
+  src/mp3_decode.cpp
+  src/obj_model.cpp)
 target_include_directories(comet_native PRIVATE third_party/minimp3)
 target_link_libraries(comet_native PRIVATE SDL3::SDL3)
 if(MSVC)
@@ -56,3 +57,9 @@ add_executable(level_data_test
   tests/level_data_test.cpp
   src/level_data.cpp)
 add_test(NAME level_data COMMAND level_data_test)
+
+# Headless unit test for the OBJ loader (SDL-free).
+add_executable(obj_model_test
+  tests/obj_model_test.cpp
+  src/obj_model.cpp)
+add_test(NAME obj_model COMMAND obj_model_test)

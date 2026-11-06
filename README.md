@@ -52,6 +52,7 @@ game binary itself.**
 - ✅ Data formats opened: `.pak` archive cracked + extracted (16 MP3 SFX, scripts/extract_pak.py); `.map` format cracked from its parser (level_parse) and verified byte-exact on all 12 maps — native parser implements it (notes/RECONSTRUCTION-006.md)
 - ✅ Frame chain named (main → game_run → game_loop → frame_input → pads_update)
 - ✅ Native host plays the game's own SFX (extracted MP3 bank via minimp3 + SDL audio)
+- ✅ Native host renders the game's own OBJ models in a projected 3D arena scene (COMET_MODEL; notes/RECONSTRUCTION-007.md)
 - ⬜ Subsystems clustered and named; first modules in `reconstruction/`
 
 ## The target

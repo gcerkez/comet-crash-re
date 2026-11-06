@@ -17,6 +17,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -24,6 +26,7 @@
 
 #include "input_mapper.h"
 #include "level_data.h"
+#include "obj_model.h"
 #include "menu_model.h"
 #include "sdl_input.h"
 #include "sfx_player.h"
@@ -167,23 +170,170 @@ void drawItemList(SDL_Renderer* r, float W, float H, const comet::Screen& s) {
     }
 }
 
+
+// ---- minimal projected-3D scene (the PSGL stand-in for now) ----
+// PSGL is OpenGL ES 1.x; this host renderer plays the same role with
+// CPU projection + SDL_RenderGeometry triangles: a ground grid sized
+// from the level header extents and the game's own OBJ geometry,
+// lambert-shaded, painter-sorted.
+
+struct Vec3f { float x, y, z; };
+
+Vec3f vsub(Vec3f a, Vec3f b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+Vec3f vcross(Vec3f a, Vec3f b) {
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+float vdot(Vec3f a, Vec3f b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+Vec3f vnorm(Vec3f a) {
+    const float l = std::sqrt(vdot(a, a));
+    return l > 0 ? Vec3f{a.x / l, a.y / l, a.z / l} : a;
+}
+
+struct Camera {
+    Vec3f eye, fwd, right, up;
+    float focal; // in pixels
+};
+
+Camera makeCamera(float W, float H, double t) {
+    const float ang = (float)(t * 0.25);
+    Camera c;
+    c.eye = {std::sin(ang) * 15.0f, 8.5f, std::cos(ang) * 15.0f};
+    const Vec3f target{0, 0.8f, 0};
+    c.fwd = vnorm(vsub(target, c.eye));
+    c.right = vnorm(vcross(c.fwd, {0, 1, 0}));
+    c.up = vcross(c.right, c.fwd);
+    c.focal = (H * 0.5f) / std::tan(0.45f); // ~52 deg vertical fov
+    (void)W;
+    return c;
+}
+
+// Returns false when behind the camera.
+bool project(const Camera& c, float W, float H, Vec3f p, float& sx, float& sy,
+             float& depth) {
+    const Vec3f d = vsub(p, c.eye);
+    depth = vdot(d, c.fwd);
+    if (depth < 0.5f) {
+        return false;
+    }
+    sx = W * 0.5f + vdot(d, c.right) * c.focal / depth;
+    sy = H * 0.5f - vdot(d, c.up) * c.focal / depth;
+    return true;
+}
+
+void drawScene3D(SDL_Renderer* r, float W, float H, const comet::ObjModel& obj,
+                 const comet::LevelData* level, double t) {
+    const Camera cam = makeCamera(W, H, t);
+    // Ground extent from the level header (fields 3/4 are the large
+    // round numbers), clamped to a sane scene size.
+    float extent = 10.0f;
+    if (level != nullptr && level->header[3] >= 100 && level->header[3] <= 4000) {
+        extent = (float)level->header[3] / 100.0f;
+    }
+    // Ground plane (two translucent triangles) + grid lines.
+    {
+        SDL_Vertex quad[4];
+        const Vec3f corners[4] = {{-extent, 0, -extent}, {extent, 0, -extent},
+                                  {extent, 0, extent}, {-extent, 0, extent}};
+        bool ok = true;
+        for (int i = 0; i < 4; ++i) {
+            float sx, sy, dep;
+            ok = ok && project(cam, W, H, corners[i], sx, sy, dep);
+            quad[i].position = {sx, sy};
+            quad[i].color = {0.05f, 0.08f, 0.13f, 0.85f};
+            quad[i].tex_coord = {0, 0};
+        }
+        if (ok) {
+            const int idx[6] = {0, 1, 2, 0, 2, 3};
+            SDL_RenderGeometry(r, nullptr, quad, 4, idx, 6);
+        }
+        SDL_SetRenderDrawColor(r, 40, 55, 80, 255);
+        const int lines = 10;
+        for (int i = -lines; i <= lines; ++i) {
+            const float g = extent * (float)i / (float)lines;
+            float x1, y1, d1, x2, y2, d2;
+            if (project(cam, W, H, {g, 0, -extent}, x1, y1, d1) &&
+                project(cam, W, H, {g, 0, extent}, x2, y2, d2)) {
+                SDL_RenderLine(r, x1, y1, x2, y2);
+            }
+            if (project(cam, W, H, {-extent, 0, g}, x1, y1, d1) &&
+                project(cam, W, H, {extent, 0, g}, x2, y2, d2)) {
+                SDL_RenderLine(r, x1, y1, x2, y2);
+            }
+        }
+    }
+    // The model: spin around Y, hover, lambert shading, painter sort.
+    {
+        struct Tri { float sx[3], sy[3], depth, shade; };
+        std::vector<Tri> tris;
+        const float rot = (float)(t * 0.8);
+        const float cs = std::cos(rot), sn = std::sin(rot);
+        const float scale = obj.radius > 0 ? 5.0f / obj.radius : 1.0f;
+        const Vec3f light = vnorm({0.5f, 0.8f, 0.3f});
+        for (std::size_t ti = 0; ti < obj.triangles.size(); ++ti) {
+            const auto& tr = obj.triangles[ti];
+            Tri out{};
+            out.depth = 0;
+            bool ok = true;
+            for (int k = 0; k < 3; ++k) {
+                const auto& p = obj.positions[tr.v[k]];
+                const Vec3f wp{p[0] * scale * cs - p[2] * scale * sn,
+                               p[1] * scale + 1.4f,
+                               p[0] * scale * sn + p[2] * scale * cs};
+                float dep;
+                ok = ok && project(cam, W, H, wp, out.sx[k], out.sy[k], dep);
+                out.depth += dep;
+            }
+            if (!ok) {
+                continue;
+            }
+            out.depth /= 3.0f;
+            const auto& fn = obj.faceNormals[ti];
+            const Vec3f n{fn[0] * cs - fn[2] * sn, fn[1], fn[0] * sn + fn[2] * cs};
+            float lam = vdot(n, light);
+            if (lam < 0) {
+                lam = -lam * 0.6f; // double-sided: dim the back
+            }
+            out.shade = 0.30f + 0.70f * lam;
+            tris.push_back(out);
+        }
+        std::sort(tris.begin(), tris.end(),
+                  [](const Tri& a, const Tri& b) { return a.depth > b.depth; });
+        for (const Tri& tr : tris) {
+            SDL_Vertex verts[3];
+            for (int k = 0; k < 3; ++k) {
+                verts[k].position = {tr.sx[k], tr.sy[k]};
+                verts[k].color = {0.45f * tr.shade + 0.10f, 0.58f * tr.shade + 0.08f,
+                                  0.78f * tr.shade + 0.05f, 1.0f};
+                verts[k].tex_coord = {0, 0};
+            }
+            SDL_RenderGeometry(r, nullptr, verts, 3, nullptr, 0);
+        }
+    }
+}
+
 void drawArena(SDL_Renderer* r, float W, float H, const comet::MenuModel& model,
                const InputFrame& frame, bool dimmed,
-               const comet::LevelData* level) {
-    // Placeholder arena: grid + ship cursor, as in milestone 1.
+               const comet::LevelData* level, const comet::ObjModel* objModel,
+               double timeSec) {
+    // With a model loaded, the arena is the projected 3D scene;
+    // otherwise the milestone-1 grid + parsed-record overlay.
+    const bool scene = (objModel != nullptr && !objModel->empty() && !dimmed);
+    if (scene) {
+        drawScene3D(r, W, H, *objModel, level, timeSec);
+    }
     const float cell = H / 12.0f;
     SDL_SetRenderDrawColor(r, dimmed ? 18 : 30, dimmed ? 22 : 38, dimmed ? 30 : 52, 255);
-    for (int gx = 0; gx <= 16; gx++) {
+    for (int gx = 0; !scene && gx <= 16; gx++) {
         SDL_RenderLine(r, gx * cell, 0, gx * cell, H);
     }
-    for (int gy = 0; gy <= 12; gy++) {
+    for (int gy = 0; !scene && gy <= 12; gy++) {
         SDL_RenderLine(r, 0, gy * cell, 16 * cell, gy * cell);
     }
     // Real level data, when a .map was loaded (COMET_MAP): draw the
     // parsed records — orientation records as ticks keyed to their
     // quaternion's first two components, object records as markers in
     // a band below, both in file order, 40 per row.
-    if (level != nullptr && !dimmed && !level->records56.empty()) {
+    if (level != nullptr && !dimmed && !scene && !level->records56.empty()) {
         const float step = cell * 0.5f;
         SDL_SetRenderDrawColor(r, 235, 180, 90, 255);
         int i = 0;
@@ -277,6 +427,17 @@ int main(int argc, char** argv) {
         }
     }
     const comet::LevelData* levelArg = haveLevel ? &level : nullptr;
+    comet::ObjModel objModel;
+    bool haveModel = false;
+    if (const char* modelPath = SDL_getenv("COMET_MODEL")) {
+        haveModel = objModel.loadFromFile(modelPath);
+        if (logFrames) {
+            SDL_Log("COMET_MODEL %s: %s (%zu verts, %zu tris)", modelPath,
+                    haveModel ? "loaded" : "FAILED", objModel.positions.size(),
+                    objModel.triangles.size());
+        }
+    }
+    const comet::ObjModel* modelArg = haveModel ? &objModel : nullptr;
     comet::SfxPlayer sfx;
     if (const char* sfxDir = SDL_getenv("COMET_SFX_DIR")) {
         const int n = sfx.loadFromDir(sfxDir);
@@ -314,7 +475,22 @@ int main(int argc, char** argv) {
             running = false;
         }
 
-        model.update(frame, (float)winW, (float)winH);
+        // Demo script (COMET_START_ARENA=1): synthetic frames walk
+        // Title -> Campaign -> Area 1 -> Start Game so the arena (and
+        // the 3D scene) can be smoke-tested headlessly.
+        if (SDL_getenv("COMET_START_ARENA") != nullptr && frameNo < 10) {
+            InputFrame demo{};
+            switch (frameNo) {
+                case 1: demo.pressed = demo.buttons = BtnStart; break;
+                case 3: demo.moveY = 1.0f; break;
+                case 5: case 7: case 9:
+                    demo.pressed = demo.buttons = BtnConfirm; break;
+                default: break;
+            }
+            model.update(demo, (float)winW, (float)winH);
+        } else {
+            model.update(frame, (float)winW, (float)winH);
+        }
         (void)model.takeAction();  // run-start hooks land with gameplay
 
         // One-shot SFX (MultiStream's job on PS3): the bank's own
@@ -334,7 +510,8 @@ int main(int argc, char** argv) {
         const comet::Screen& cur = model.current();
 
         if (model.arenaBehind() && cur.id != comet::ScreenId::Arena) {
-            drawArena(renderer, W, H, model, frame, true, levelArg);
+            drawArena(renderer, W, H, model, frame, true, levelArg, modelArg,
+                        (double)frameNo / 60.0);
             comet::FloatRect panel = comet::MenuModel::panelRect(W, H);
             SDL_SetRenderDrawColor(renderer, 12, 16, 26, 235);
             SDL_FRect pf{panel.x, panel.y, panel.w, panel.h};
@@ -346,7 +523,8 @@ int main(int argc, char** argv) {
             drawTextCentered(renderer, W * 0.5f, panel.y + 18, 3.0f, 240, 200, 90, title);
             drawItemList(renderer, W, H, cur);
         } else if (cur.id == comet::ScreenId::Arena) {
-            drawArena(renderer, W, H, model, frame, false, levelArg);
+            drawArena(renderer, W, H, model, frame, false, levelArg, modelArg,
+                        (double)frameNo / 60.0);
         } else if (cur.id == comet::ScreenId::Title) {
             drawTextCentered(renderer, W * 0.5f, H * 0.30f, 6.0f, 240, 200, 90,
                              cur.titleLiteral);

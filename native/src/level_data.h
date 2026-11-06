@@ -8,7 +8,9 @@
 //   count56 records of 56 bytes (orientation records):
 //     u8 type @0, quaternion (4 floats) @4, u32 field @20, rest zero
 //   count24 records of 24 bytes (object records):
-//     float @0, bytes @4..7 (incl. type @6, subtype @7), rest zero
+//     float @0 (7..796 across shipped maps), bytes @4..8 — @6 is a
+//     small class (0..2), @7 carries the values level_parse branches
+//     on (9, 10, 20, 21-24 seen there), rest zero
 //
 // File size must be exactly 136 + count56*56 + count24*24 — verified
 // against all twelve shipped maps. Levels below 61 are embedded in
