@@ -51,3 +51,4 @@ fc778,arena_setSceneView
 fc828,arena_drawFullscreenQuad
 133eb0,gui_setView
 fce34,arena_renderTargetFlag
+106b58,arena_entityTransformPass
