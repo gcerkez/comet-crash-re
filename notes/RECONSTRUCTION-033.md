@@ -14,8 +14,10 @@ Following the initial bring-up in notes 032, the remaining startup blockers were
    Choosing no will disable scoreboard features.
    ```
    With the default auto-responder answering `YES`, the title repeatedly attempted network auto-connection and re-prompted in a tight loop. Setting `MSGDIALOG_ANSWER=no` answers `NO`, disabling online leaderboards and allowing the title to advance.
+6. **Vulkan Wayland Swapchain Formats**: Modern AMD RADV under Wayland enumerates >64 surface formats. `rsx_vulkan_backend.c` clamped `nf` to 64, causing `vkGetPhysicalDeviceSurfaceFormatsKHR` to return `VK_INCOMPLETE` (`5`), which was previously treated as an error by `VK_CHECK` and caused the window to be dropped. Allowing `VK_INCOMPLETE` enabled swapchain initialization and true window presentation (`1280x720, 4 images, format 44`).
 
 ## Boot Verification
+
 
 With `PS3RECOMP_VK_WINDOW=1 MSGDIALOG_ANSWER=no PS3_VFS_ROOT=$HOME/tools/cc-recomp/vfs ./build/CometCrashRecomp`:
 - Shaders loaded and compiled: `font_rgba_shader`, `star_shader`, `particle_texture_shader`, `texture_shader`, `down_sample`, `shadows`, `bloom2light`, `hdr_glow_x/y`, `hdr_tone_map`, `lit_texture_shader`, `lit_object_shader`, `lit_texture_spec_gloss_shader`.
