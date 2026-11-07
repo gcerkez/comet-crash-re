@@ -31,16 +31,13 @@ Both halves, split cleanly:
   kamikaze / harvester files. The models present are the base set.
 - The DLC was sold as a separate add-on PKG (US store, 2010-11-16,
   $4.99, 43 MB: 16 campaign levels, 10 battle maps, two new
-  environments, on top of the units/structures above). ***REMOVED***
-  lists "Comet Crash: Bionic Swarm" as PS3 DLC (US) for NPUB30061 —
-  the same archive the base game PKG came from (Jerry's own
-  PS3_GAMES.tsv route).
+  environments, on top of the units/structures above). The DLC is
+  catalogued as PS3 add-on content (US) for NPUB30061.
 
 ## Integration plan (pending Jerry's go-ahead to fetch)
 
-1. Pull the PS3 DLC catalog entry (content ID, PKG link, RAP) from
-   ***REMOVED***, download the DLC PKG, extract it (PSN PKG tools
-   already on the desktop).
+1. Obtain the DLC PKG for the owner's copy, extract it (PSN PKG
+   tools already on the desktop).
 2. Lay its USRDIR content into the recomp VFS overlay under the
    NPUB30061 tree (same merge pattern as patch-over-full).
 3. Boot and look: era-typical add-ons are file-gated (content enables
@@ -54,10 +51,8 @@ Both halves, split cleanly:
 
 ## Outcome (2026-11-07, Jerry approved the fetch): ENABLED
 
-- Catalog (***REMOVED*** PS3_DLCS.tsv): content ID
-  UP2009-NPUB30061_00-PELFASTCC00DLC00, PKG 44,630,320 bytes from
-  Sony's CDN, RAP in the TSV row. Downloaded to ~/Downloads/
-  BionicSwarm_DLC.pkg (size matches the catalog exactly) and
+- The DLC package (content ID
+  UP2009-NPUB30061_00-PELFASTCC00DLC00, 44,630,320 bytes) was
   extracted with extract_ps3_pkg.py: 142 files — the expansion model
   set (incl. Jungle and Scifi environment sets), swarm1/swarm2 model
   families, data3.pak / data4.pak / data5.pak, levels 94, 95,

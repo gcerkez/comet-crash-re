@@ -36,13 +36,10 @@ Date: 2026-11-05. Machine: JerryDesktop (Bazzite Linux).
   Gotcha: that `keys` file ships with CRLF line endings; scetool's parser
   rejects every entry until CRs are stripped. scetool finds its data only via
   the `PS3` environment variable pointing at the directory.
-- The title's **RAP** (`UP2009-NPUB30061_00-PELFASTCC0000020.rap`, 16 bytes):
-  ***REMOVED***'s PS3_GAMES.tsv has **no** RAP for NPUB30061. The file was
-  found in two independent public license collections on ***REMOVED***
-  (`***REMOVED***` and `***REMOVED***`); the two copies are
-  byte-identical, which is why they were trusted. Staged at
-  `~/scetool-data/raps/` and in the working folder. The RAP file itself is
-  deliberately not committed to this repo.
+- The title's **RAP** (the owner's license file for this title,
+  16 bytes): staged locally at `~/scetool-data/raps/` and in the
+  working folder. License files and key material are never
+  committed to this repo.
 
 ## Decryption
 

@@ -37,3 +37,8 @@ recomp/spu/
 recomp/vfs/
 recomp/gamedata/
 recomp/savedata/
+
+# Game-derived material (regenerate from your own dump; see READMEs)
+/analysis/
+assets/icon0.png
+native/src/language1.inc
