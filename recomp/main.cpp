@@ -231,7 +231,7 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 /* Four toggles (index order fixed; stage 2's in-game Cheats submenu   */
 /* flips them through comet_cheats_flip):                              */
 /*   0 thorium     pin the player's Thorium wallet (both shadow        */
-/*                 records + the float source channel) at 5000       */
+/*                 records + the float source channel) at 1000       */
 /*   1 buildables  neutralise the build palette's requirement table    */
 /*                 and set the two tech-mask bits, so every model      */
 /*                 kind is buildable in every mode                     */
@@ -399,9 +399,9 @@ static void comet_cheats_tick(void)
         /* Pin only when both shadow records carry their sentinel, so a
          * different layout can never be written by mistake. */
         if (comet_rd32(kBase + 0x1B0) == 0x7FFFFFFF && comet_rd32(kBase + 0x1D0) == 0x7FFFFFFF) {
-            comet_wr32(kBase + 0x1B4, 5000);
-            comet_wr32(kBase + 0x1D4, 5000);
-            float thf = 5000.0f; uint32_t thbits; memcpy(&thbits, &thf, 4);
+            comet_wr32(kBase + 0x1B4, 1000);
+            comet_wr32(kBase + 0x1D4, 1000);
+            float thf = 1000.0f; uint32_t thbits; memcpy(&thbits, &thf, 4);
             comet_wr32(kBase + 0x3C8, thbits);
         }
     }
