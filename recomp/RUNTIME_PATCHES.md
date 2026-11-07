@@ -210,3 +210,18 @@ and a flip made from pause applies to the paused match at once
 Verified in a driven session: pause -> Settings shows Cheats as the
 fifth item; the submenu opens over the paused game; a flip made
 there (Health Off -> On) reads back correctly on reopen.
+
+## 16. NV3089 copies out of AA surfaces take the GPU blit (fork 9ec0d82c)
+
+`rsx_draw_engine_blit` declined every blit whose source was an
+antialiased surface, so this title's per-frame scene-to-effect-texture
+copies (1024x1024 -> 512x512 at ds=dt=2, ~3 per frame) fell back to a
+full guest-memory readback (with a pipeline drain), a CPU nearest
+downscale, and a texture re-decode on next sample. The fix drops the
+source-side decline, clamps the source rectangle against the sample
+extent instead of the logical dims, and keeps AA sources on nearest
+sampling (the fallback's semantics). Destination-side AA still
+declines; non-AA blits are unchanged. Measured on the desktop's RX
+7900 XTX (1920x1080, same driven scene, 60 s window): 37.0 -> 71.0
+guest fps, and the readback/decode complex no longer appears in
+FIFO-thread stack samples. Full investigation: notes 042.
