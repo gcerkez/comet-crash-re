@@ -20,9 +20,10 @@ export PS3RECOMP_SPIRV_CACHE="${PS3RECOMP_SPIRV_CACHE:-/tmp/spirv_cache}"
 export VK_DRAW_BATCH=1
 export PS3_VIDEO_RES="${PS3_VIDEO_RES:-720}"
 export MSGDIALOG_ANSWER=no
-export PAD_DEBUG_LOG="${PAD_DEBUG_LOG:-1}"
-export CC_ZOOM_DIAG="${CC_ZOOM_DIAG:-1}"
-export CC_LOCK_ZOOM="${CC_LOCK_ZOOM:-0}"
+export PAD_DEBUG_LOG="${PAD_DEBUG_LOG:-0}"
+export CC_CAM_DIAG="${CC_CAM_DIAG:-1}"
+export CC_LOCK_ZOOM="${CC_LOCK_ZOOM:-1}"
+export CC_FORCE_OVERVIEW="${CC_FORCE_OVERVIEW:-1}"
 
 echo "[*] Launching Comet Crash Recomp..."
 echo "    VFS:  $PS3_VFS_ROOT"
