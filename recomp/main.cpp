@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>
 
 #ifndef _WIN32
 #include <sys/mman.h>   /* mmap: the guest arena, see alloc_guest_vm */
@@ -223,9 +224,170 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 }
 #endif
 
+
+/* ------------------------------------------------------------------ */
+/* Comet Crash cheats -- stage 1: host-side effects.                   */
+/*                                                                     */
+/* Three toggles (index order fixed; stage 2's in-game Cheats submenu  */
+/* flips them through comet_cheats_flip):                              */
+/*   0 thorium     pin the player's Thorium wallet (both shadow        */
+/*                 records + the float source channel) at 100000       */
+/*   1 buildables  neutralise the build palette's requirement table    */
+/*                 and set the two tech-mask bits, so every model      */
+/*                 kind is buildable in every mode                     */
+/*   2 stockpiles  pin unit stockpiles so produced unit types can      */
+/*                 be sent indefinitely                                */
+/*                                                                     */
+/* Initial state comes from CC_CHEAT_THORIUM / CC_CHEAT_BUILDABLES /   */
+/* CC_CHEAT_STOCKPILES (set and not "0" = on). A control file          */
+/* (CC_CHEATS_FILE, default $HOME/.cc_cheats) with lines               */
+/* "thorium=1" / "buildables=0" / "stockpiles=1" is re-read whenever   */
+/* its mtime changes, so toggles can flip while the game runs.         */
+/*                                                                     */
+/* Guest addresses (verified 2026-11-07 against the corpus and live    */
+/* memory; see notes/RECONSTRUCTION-041): the central game-state       */
+/* object sits at guest 0x30E600; its state word at +0x5520C0 (13 =    */
+/* arena, 14 = pause); the Thorium stat block at +0x1B0 (sentinel      */
+/* 0x7FFFFFFF, balance +0x1B4, shadow copy +0x1D0/+0x1D4) is seeded     */
+/* from float channels at +0x348+i*0x80 (channel 1 at +0x3C8); the     */
+/* requirement table at guest 0x17F330 holds 28 records of 20 bytes    */
+/* (first word = required level, indexed (kind-20)*20); the tech       */
+/* mask u16 is at +0x302+p*0x80 (bits 4/5 gate kinds 32/27); unit      */
+/* stockpile u16s at +0x364+p*0x80+k*2.                                */
+/* ------------------------------------------------------------------ */
+#define COMET_CHEAT_COUNT 3
+static int s_cheats[COMET_CHEAT_COUNT] = { 0, 0, 0 };
+static const char *const s_cheat_names[COMET_CHEAT_COUNT] = { "thorium", "buildables", "stockpiles" };
+
+static uint32_t comet_rd32(uint32_t guest_addr)
+{
+    return __builtin_bswap32(*(uint32_t *)(vm_base + guest_addr));
+}
+static void comet_wr32(uint32_t guest_addr, uint32_t v)
+{
+    *(uint32_t *)(vm_base + guest_addr) = __builtin_bswap32(v);
+}
+static uint16_t comet_rd16(uint32_t guest_addr)
+{
+    return __builtin_bswap16(*(uint16_t *)(vm_base + guest_addr));
+}
+static void comet_wr16(uint32_t guest_addr, uint16_t v)
+{
+    *(uint16_t *)(vm_base + guest_addr) = __builtin_bswap16(v);
+}
+
+extern "C" int comet_cheats_get(int idx)
+{
+    return (idx >= 0 && idx < COMET_CHEAT_COUNT) ? s_cheats[idx] : 0;
+}
+extern "C" void comet_cheats_flip(int idx)
+{
+    if (idx >= 0 && idx < COMET_CHEAT_COUNT) s_cheats[idx] = !s_cheats[idx];
+}
+
+static void comet_cheats_poll(void)
+{
+    static int s_init = 0;
+    static long s_file_mtime = -1;
+    static int s_frame = 0;
+    if (!s_init) {
+        s_init = 1;
+        const char *envs[COMET_CHEAT_COUNT] = {
+            getenv("CC_CHEAT_THORIUM"), getenv("CC_CHEAT_BUILDABLES"), getenv("CC_CHEAT_STOCKPILES")
+        };
+        for (int i = 0; i < COMET_CHEAT_COUNT; i++)
+            if (envs[i] && envs[i][0] && strcmp(envs[i], "0") != 0) s_cheats[i] = 1;
+        if (s_cheats[0] || s_cheats[1] || s_cheats[2])
+            fprintf(stderr, "[cheats] env: thorium=%d buildables=%d stockpiles=%d\n",
+                    s_cheats[0], s_cheats[1], s_cheats[2]);
+    }
+    if ((++s_frame % 30) != 0) return;
+    const char *path = getenv("CC_CHEATS_FILE");
+    char defpath[512];
+    if (!path || !path[0]) {
+        const char *home = getenv("HOME");
+        snprintf(defpath, sizeof defpath, "%s/.cc_cheats", home ? home : ".");
+        path = defpath;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0) return;
+    if ((long)st.st_mtime == s_file_mtime) return;
+    s_file_mtime = (long)st.st_mtime;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[128];
+    int changed = 0;
+    while (fgets(line, sizeof line, f)) {
+        for (int i = 0; i < COMET_CHEAT_COUNT; i++) {
+            size_t n = strlen(s_cheat_names[i]);
+            if (strncmp(line, s_cheat_names[i], n) == 0 && line[n] == '=') {
+                int v = (line[n + 1] == '1') ? 1 : 0;
+                if (s_cheats[i] != v) { s_cheats[i] = v; changed = 1; }
+            }
+        }
+    }
+    fclose(f);
+    if (changed)
+        fprintf(stderr, "[cheats] file: thorium=%d buildables=%d stockpiles=%d\n",
+                s_cheats[0], s_cheats[1], s_cheats[2]);
+}
+
+static void comet_cheats_tick(void)
+{
+    static const uint32_t kBase = 0x0030E600;
+    static uint32_t s_req_orig[28];
+    static int s_req_patched = 0;
+    if (!vm_base) return;
+    comet_cheats_poll();
+
+    uint32_t state = comet_rd32(kBase + 0x005520C0);
+    int in_match = (state == 13 || state == 14);
+
+    /* Buildables: requirement-table neutralise/restore is edge-triggered
+     * (the table is static data; patch once, restore on toggle off). */
+    if (s_cheats[1] && !s_req_patched) {
+        for (int i = 0; i < 28; i++) {
+            s_req_orig[i] = comet_rd32(0x0017F330 + i * 20);
+            comet_wr32(0x0017F330 + i * 20, 0);
+        }
+        s_req_patched = 1;
+        fprintf(stderr, "[cheats] requirement table neutralised\n");
+    } else if (!s_cheats[1] && s_req_patched) {
+        for (int i = 0; i < 28; i++)
+            comet_wr32(0x0017F330 + i * 20, s_req_orig[i]);
+        s_req_patched = 0;
+        fprintf(stderr, "[cheats] requirement table restored\n");
+    }
+    if (s_cheats[1] && in_match) {
+        for (int p = 0; p < 4; p++) {
+            uint32_t a = kBase + 0x302 + p * 0x80;
+            comet_wr16(a, (uint16_t)(comet_rd16(a) | 0x0030));
+        }
+    }
+
+    if (!in_match) return;
+
+    if (s_cheats[0]) {
+        /* Pin only when both shadow records carry their sentinel, so a
+         * different layout can never be written by mistake. */
+        if (comet_rd32(kBase + 0x1B0) == 0x7FFFFFFF && comet_rd32(kBase + 0x1D0) == 0x7FFFFFFF) {
+            comet_wr32(kBase + 0x1B4, 100000);
+            comet_wr32(kBase + 0x1D4, 100000);
+            comet_wr32(kBase + 0x3C8, 0x47C35000u); /* 100000.0f */
+        }
+    }
+    if (s_cheats[2]) {
+        for (int p = 0; p < 2; p++)
+            for (int k = 0; k < 8; k++)
+                comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 999);
+    }
+}
+
 static void comet_crash_camera_tick(void)
 {
     if (!vm_base) return;
+
+    comet_cheats_tick();
 
     static const uint32_t kGameBase = 0x0030E600;
     static int s_cam_diag = -1;
