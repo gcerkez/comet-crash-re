@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifndef _WIN32
 #include <sys/mman.h>
@@ -234,6 +235,27 @@ static DWORD WINAPI frame_clock(LPVOID)
                             fflush(stdout);
                             s_last_state = st;
                         }
+                    }
+                }
+
+                static int s_zoom_diag = -1;
+                if (s_zoom_diag < 0) s_zoom_diag = getenv("CC_ZOOM_DIAG") ? 1 : 0;
+                static int s_lock_zoom = -1;
+                if (s_lock_zoom < 0) s_lock_zoom = getenv("CC_LOCK_ZOOM") ? 1 : 0;
+                if (vm_base) {
+                    uint32_t raw_z = __builtin_bswap32(*(uint32_t*)(vm_base + 0x005520d8));
+                    float cur_z = 0.0f;
+                    memcpy(&cur_z, &raw_z, 4);
+                    if (s_lock_zoom) {
+                        uint32_t zero = 0;
+                        *(uint32_t*)(vm_base + 0x005520d8) = zero;
+                        cur_z = 0.0f;
+                    }
+                    static float s_last_z = -999.0f;
+                    if (s_zoom_diag && (fabsf(cur_z - s_last_z) > 0.001f || (fc % 120 == 0))) {
+                        printf("[CC_ZOOM] flip %u: zoom=%.4f (locked=%d)\n", fc, cur_z, s_lock_zoom);
+                        fflush(stdout);
+                        s_last_z = cur_z;
                     }
                 }
             } else if (fc == 0) {
