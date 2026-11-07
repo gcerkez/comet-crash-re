@@ -1,0 +1,134 @@
+# Runtime Patches to ps3recomp
+
+This file documents all changes applied to the toolkit clone (`~/tools/ps3recomp`).
+
+---
+
+### 1. `libs/codec/cellPngDec.c`: Validate and load source data during `cellPngDecOpen`
+
+- **File**: `libs/codec/cellPngDec.c` (in `cellPngDecOpen`)
+- **What Changed**: Added a call to `pngdec_load_source(sub)` inside `cellPngDecOpen`. If loading fails (e.g. file not found or invalid memory buffer), `cellPngDecOpen` resets the subhandle (`sub->in_use = 0`) and returns `CELL_PNGDEC_ERROR_OPEN_FILE` (`0x80611151`).
+- **Why**: According to the Sony PS3 Cell SDK specification, `cellPngDecOpen` must attempt to open the file stream and return `CELL_PNGDEC_ERROR_OPEN_FILE` if the file cannot be opened. The previous implementation deferred file opening to `cellPngDecReadHeader` and always returned `CELL_OK` from `cellPngDecOpen`. Comet Crash's PNG loader (`FUN_0016eb54` @ `0x0016eb54`) checks the return value of `cellPngDecOpen`; when it blindly received `CELL_OK`, it proceeded to call `cellPngDecReadHeader`, did not check the header return code, and proceeded to execute an indirect branch on uninitialized stack memory. Returning `CELL_PNGDEC_ERROR_OPEN_FILE` from `cellPngDecOpen` allows `FUN_0016eb54` to exit cleanly on missing files.
+- **Upstreamable**: **YES, definitely upstreamable**. This conforms directly to official Sony Cell SDK behavior and RPCS3's `cellPngDecOpen` error semantics.
+
+---
+
+### 2. `runtime/syscalls/sys_fs.c` & `runtime/ppu/ppu_fs.cpp`: Unified file descriptor allocation
+
+- **Files**: `runtime/syscalls/sys_fs.c`, `runtime/ppu/ppu_fs.cpp`
+- **What Changed**: Exported `sys_fs_claim_fd(void* host_file_or_stream)` and `sys_fs_free_fd(int fd)` from `sys_fs.c` and routed `cellFsSdataOpen` in `ppu_fs.cpp` through the shared file descriptor table instead of maintaining a disjoint table.
+- **Why**: `cellFsSdataOpen` allocated file descriptors in an isolated table in `ppu_fs.cpp`, but subsequent `cellFsRead` / `sys_fs_read` syscalls looked up the descriptor in `sys_fs.c`'s `s_fds` table. As a result, reading `package.lua.sdat` failed with `EBADF` (9), preventing game startup scripts from loading.
+- **Upstreamable**: **YES, definitely upstreamable**. All LV2 / CellFs file descriptor operations must share a single descriptor namespace.
+
+---
+
+### 3. `libs/network/sceNp.c`: Check file existence in `np_drm_is_available` (`sceNpDrmIsAvailable` / `sceNpDrmIsAvailable2`)
+
+- **File**: `libs/network/sceNp.c` (in `np_drm_is_available`)
+- **What Changed**: Translated `drm_path` via `cellfs_translate_path` and verified file existence with `fopen`. If the DRM file (`.edat`) is missing or cannot be opened, returns `0x80029513` (`SCE_NP_DRM_ERROR_FILE_NOT_FOUND`) instead of blindly returning `CELL_OK` (`0`).
+- **Why**: Comet Crash checks whether DLC 1 is installed via `FUN_0016ea30` (`0x0016ea30`), which queries `sceNpDrmIsAvailable2(..., ".../data/dlc1.edat")`. When `sceNpDrmIsAvailable2` returned `CELL_OK` on missing `dlc1.edat`, the game assumed DLC 1 was installed (`dlcStatus = 2`), and attempted to load DLC asset packs (`data3.pak`, `data4.pak`, `data5.pak`). Because those files do not exist in the base package, `FUN_001648d0` failed with `file load error: .../data3.pak`, set global error flag `*0x00873065 = 1` (`g_hasError = 1`), and triggered an immediate abort to `cellGameContentErrorDialog(101)` (`BROKEN_EXIT_HDDGAME`).
+- **Upstreamable**: **YES, definitely upstreamable**. On real PS3, checking availability of non-existent DRM content returns `0x80029513`.
+
+---
+
+### 4. `libs/spurs/cellSpurs.c`, `libs/spurs/cellSpurs.h`, `tools/nid_database.py`: Implementation of `cellSpursAddUrgentCommand`, `cellSpursAddUrgentCall`, and `JOBLIST` (Opcode 6)
+
+- **Files**: `libs/spurs/cellSpurs.c`, `libs/spurs/cellSpurs.h`, `tools/nid_database.py`
+- **What Changed**:
+  1. Added `cellSpursAddUrgentCommand(u64 jc_ea, u64 cmd)` (NID `0x17001000`) and `cellSpursAddUrgentCall(u64 jc_ea, u64 cmd_list_ea)` (NID `0x8FDF50B2`). Writes commands into guest `urgentCmds[4]` at `jc_ea + 0x30` and queues into `s_jobchains[slot].urgent_cmd`.
+  2. Updated `jc_execute` to poll and process urgent commands prior to fetching from `pc`: handles `RESET_PC` (opcode 1, sets `pc`), `CALL` (opcode 4, saves `ret_pc`), and `JOB` (opcode 0, executes job synchronously).
+  3. Implemented `JOBLIST` command (opcode 6): reads `CellSpursJobList` header at `jl_ea` (`numJobs`, `sizeOfJob`, `eaJobList`) and dispatches all constituent jobs.
+  4. On `END` command (opcode 7, extension 127 = 0x7F): checks if the chain has an associated `CellSpursEventFlag` at `jc_ea + 0x580` (`ef_sync_find(jc_ea + 0x580)`), and sets bit 1 to unblock waiters.
+- **Why**: Comet Crash's main thread dispatches SPU background workloads (via `FUN_0016b91c` @ `0x0016b91c`) by appending a `NEXT` pointer to its command buffer, issuing `cellSpursAddUrgentCommand(0x002c5780, cmd | 1)` to reset PC to the command buffer, and running `cellSpursRunJobChain`. Because `cellSpursAddUrgentCommand` was an unresolved NID stub, urgent commands were dropped, the job chain immediately terminated on its empty initial entry (`0x7F` END), the completion SPU job at `0x00186980` never ran, and the main thread blocked forever in `cellSpursEventFlagWait(0x002c5d00, &bit1, 1)`.
+- **Upstreamable**: **YES, definitely upstreamable**. This completes core SPURS job chain execution semantics required by titles using urgent command injection.
+
+---
+
+### 5. `libs/video/rsx_vulkan_backend.c`: Tolerate `VK_INCOMPLETE` in `vkGetPhysicalDeviceSurfaceFormatsKHR`
+
+- **File**: `libs/video/rsx_vulkan_backend.c` (in `vk_create_swapchain`)
+- **What Changed**: Allowed `VK_INCOMPLETE` (`5`) alongside `VK_SUCCESS` when fetching surface formats into the fixed 64-element `fmts` array (`sfr != VK_SUCCESS && sfr != VK_INCOMPLETE`).
+- **Why**: On modern GPUs and drivers (such as AMD Radeon RX 7900 XTX with RADV under Wayland), the surface supports more than 64 formats. `rsx_vulkan_backend.c` clamped `nf` to 64: `if (nf > 64) nf = 64;`. According to the Vulkan specification, when `pSurfaceFormatCount` is less than the total supported formats, `vkGetPhysicalDeviceSurfaceFormatsKHR` returns `VK_INCOMPLETE` (`5`). The macro `VK_CHECK` treated `VK_INCOMPLETE` as an error, aborted swapchain creation with `[RSX vulkan] vkGetPhysicalDeviceSurfaceFormatsKHR failed (VkResult 5)`, and invoked `vk_window_drop()`, disabling the window and falling back to headless mode. Tolerating `VK_INCOMPLETE` allows swapchain creation to inspect the first 64 formats and create the real window swapchain.
+### 6. `libs/video/cellGcmSys.c`: Correct FIFO `CALL` command encoding check
+
+- **File**: `libs/video/cellGcmSys.c` (in `gcm_rsx_process_fifo_unlocked`)
+- **What Changed**: Changed `if ((w & 3) == 2)` to `if ((w & 0xE0000003u) == 2u)`. Also updated the control flow trace and statistics checks (`0xE0000003u`).
+- **Why**: Under NVIDIA NV40 pusher command encoding, subroutine `CALL` words are encoded with bits 31-29 = `000` and bits 1-0 = `10` (`(w & 0xE0000003u) == 2u`). The loose check `(w & 3) == 2` erroneously matched any non-increasing method word (`type == 2`, bits 31-29 = `010`) whose method offset had bit 1 set, such as `0x567D1F52`. When Comet Crash submitted vertex constants using non-increasing method `0x567D1F52`, `cellGcmSys.c` misidentified the method as a `CALL 0x167D1F50`, treated `0x167D1F50` as an unmapped IO address, terminated FIFO draining with `[cellGcmSys] FIFO CALL to unmapped IO 0x167D1F50 (word 0x567D1F52) -- not taken, drain stops here`, and reset the FIFO get offset to 0, completely halting scene rendering.
+- **Upstreamable**: **YES, definitely upstreamable**. This conforms to the NV40 / RSX command encoding specification.
+
+
+
+---
+### 7. `libs/video/rsx_draw_engine.c`: GPU NV3089 blit declines antialiased surfaces
+
+- **File**: `libs/video/rsx_draw_engine.c` (in `rsx_draw_engine_blit`)
+- **What Changed**: The GPU fast path now returns 0 (fall back to the guest-memory copy in `cellGcmSys`) when the source or destination engine surface is antialiased — `(aa_grid & 0xFF) > 1 || (aa_grid >> 8) > 1`. Non-AA blits are unchanged. Committed in the fork as b8e5cbb7 (2026-11-07, at Jerry's direction).
+- **Why**: Engine surfaces for AA render targets are held at SAMPLE resolution (upstream f752e40f: a 1280x720 target with a 2x2 grid is a 2560x1440 surface), but an NV3089 blit's geometry arrives in the guest's LOGICAL pixels. The fast path (fork commit c8562f37) passed the logical rectangle straight to `vkCmdBlitImage`, so a blit of Comet Crash's scene target copied the top-left 1280x720 samples of the 2560x1440 grid — one quadrant of the composed frame — and the game's post chain presented that crop as the full picture: the arena board rendered as a ~2x zoom into the enemy-base corner, and HUD glyph surfaces moved by the same path lost their text. The pre-c8562f37 guest-memory copy handled these blits correctly. Verified by A/B: `RSX_GPU_BLIT=0` (stock everything else) restored the full-board overview and the complete HUD (timer, Thorium 100, unit counts); with the decline compiled in and GPU blits re-enabled, the same run reaches the identical correct frame. Root-cause write-up: comet-crash-re `notes/RECONSTRUCTION-035.md`.
+- **Upstreamable**: **Yes, as a correctness guard** — a GPU blit between mismatched coordinate spaces (logical guest pixels vs sample-resolution surfaces) should either translate the rectangle by the aa grid or decline; declining is the conservative choice. A future refinement could scale the source rectangle by the grid and let the blit double as the AA resolve when the destination is non-AA.
+
+### 8. `libs/video/rsx_vulkan_backend.c`: Quit confirmation hook in the window pump
+
+- **File**: `libs/video/rsx_vulkan_backend.c` (pump), plus the per-title hook in cc-recomp `main.cpp`
+- **What Changed**: `rsx_vulkan_backend_pump_messages` quit instantly on SDL_QUIT (window close) or Escape — a stray Escape threw away a run in progress (Jerry's report). The pump now consults the weak title hook `ps3_host_quit_needs_confirm()`; when it returns nonzero, an SDL message box asks ("Keep playing" / "Quit", Escape defaults to Keep playing, and if the dialog cannot be shown the quit proceeds rather than trapping the user). Comet Crash's hook reads the guest state word (DAT_005520C0) and asks only in the arena states 13 (gameplay) and 14 (pause / battle end); menus still quit immediately. Committed in the fork as a8bef568.
+- **Why**: Losing a 20-minute run to one accidental keypress is the kind of papercut that makes a port feel broken. The hook is title-side because only the title knows what a quit costs; the backend stays generic.
+- **Verified**: headless on Xvfb — Escape in state 13 opened the dialog and froze presents; "Keep playing" resumed the run (log growth + flips advancing); a second dialog's "Quit" exited the process.
+- **Upstreamable**: **Yes** — the weak-hook pattern matches how this tree already does per-title policy (cf. the semaphore job-completion hook in `sys_semaphore.c`).
+
+### 9. Log quieting: `libs/system/sysPrxForUser.c` gate + launcher defaults
+
+- **File**: `libs/system/sysPrxForUser.c`; launchers `~/tools/cc-recomp/run.sh` and comet-crash-re `recomp/run.sh`
+- **What Changed**: (a) `sys_lwcond_wait`'s `[WAIT]` fprintf was the one per-wait printer not gated behind `ps3_log_verbose()` (runtime/ps3_log.h); it is gated now, like its semaphore/event siblings. Committed in the fork as 71a0bc14. (b) Both launchers defaulted `PS3_VERBOSE=1` (tools copy, hardcoded) and `PAD_DEBUG_LOG` / `CC_CAM_DIAG` / `PS3RECOMP_VP_DIAG` to 1; all four now default to 0 and stay one env var away for diagnosis.
+- **Why**: Jerry's runs spewed several lines per frame — the two `[RSX_VP]` lines, the `[CC_CAM]` line, pad logs, and, because PS3_VERBOSE=1 forces every gated printer on, the `[spurs-job]` dispatch/return pair (~2 per job at ~1500 jobs/s, each followed by an fflush through the single stderr FILE lock). ps3_log.h's own header documents this exact failure mode starving guest threads into user-visible hitches in other titles — it is also the prime suspect for the intermittent ship "blip" Jerry reported, since the SPURS dispatch thread feeds the render pipeline.
+- **Verified**: 60 s boot-to-menu via run.sh dropped from ~13 KB/s of log to ~1.9 KB/s, and the steady state is a heartbeat: `[RSX_PRESENT]` every 60 frames plus a `[spu_workload]` milestone every 500 signals.
+- **Upstreamable**: **Yes** for the lwcond gate (consistency fix); the launcher defaults are per-title.
+
+
+### 10. `libs/input/cellPad.c`: `PAD_FILE2` — closed-loop pad driving for port 1
+
+- **File**: `libs/input/cellPad.c`
+- **What Changed**: Two halves. (a) PAD_FILE2=<path> mirrors the PAD_FILE contract for port 1 (same "0xMASK [count]" encoding, consumed on admission, held per guest report). (b) While PAD_FILE2 is set, `pad_poll_backend` marks `s_host_state[1].connected = 1` before `pad_track_assign()`, so the port reads as present from cellPadInit's baseline. Committed in the fork as 7adc9739.
+- **Why**: Every scripted mechanism (PAD_FILE, PAD_SCRIPT, PAD_AUTOPRESS) is port-0 only, and YDKJ_INJECT_PAD's 15/180-poll pulse races the guest's per-frame sampling — a second player could not be driven headless at all, which blocked reaching Battle mode (its join screen needs START + Ready on pad 2) while reproducing a rendering bug. The connected half is load-bearing: titles discover pads through cellPadGetInfo and never poll a port they believe is empty, so without it GetData(1) is never called and the file is never read.
+- **Verified**: a 2P Battle match joined, readied and started entirely from the two files (Kreios area 1, terrain level101.map). Investigation record: comet-crash-re `notes/RECONSTRUCTION-036.md`.
+- **Upstreamable**: **Yes** — it completes the existing PAD_FILE mechanism rather than adding a parallel one.
+
+
+## 11. 1080p present size follows PS3_VIDEO_RES (cc-recomp glue)
+
+The Vulkan backend creates its offscreen present target and its window
+ONCE at the size passed to rsx_backend_init and never resizes them;
+vk_eng_present blits the guest's display surface into that target every
+flip. The glue hardcoded 1280x720, so when the guest selected 1920x1080
+(PS3_VIDEO_RES unset or "1080" makes cellVideoOut offer it, and this
+title takes it), every 1080p frame was downscaled into the 720p target
+-- and maximising the window just stretched the 720p picture back up,
+which read as "no real 1080p, blocky when scaled". (The game itself
+needs no Resc work: it never calls cellResc; it renders directly into
+1920x1080 display buffers.)
+
+Fix (main.cpp, comet_window_size): the backend init size is derived
+from the same PS3_VIDEO_RES variable the cellVideoOut HLE reads --
+"1080" inits at 1920x1080, anything else keeps 1280x720. Both
+launchers (tools run.sh, repo recomp/run.sh) now default
+PS3_VIDEO_RES to 1080. Verified headless at 1920x1080: the SDL window
+opens at 1920x1080+0+0 and gameplay fills the full frame (complete
+HUD, no letterbox). A backend-side dynamic resize on presented-surface
+size change remains the general-title follow-up; the init-size route
+covers mode-at-boot titles like this one.
+
+
+## 12. Right-stick range boost in cellPad (notes 038)
+
+Titles tuned on a DualShock 3 put hard-tilt gates near full scale --
+Comet Crash's unit-send commit needs converted stick magnitude over
+0.9 (raw bytes ~246+), which the DS3 reaches by saturating at the
+rim. The SDL/XInput fills mapped a modern pad's circular gate
+linearly, so a full tilt landed at ~218-245: the send menu engaged
+but the selection lock never set and auto-send never started.
+
+pad_boost_right_axis() in libs/input/cellPad.c now stretches the
+right stick's deflection about the centre (default x1.25, clamped to
+the byte range) in both backend fills. Centre and converter
+deadzones are untouched; the left stick is left alone. The gain is
+tunable via PAD_STICK_BOOST (1.0 = off, clamped 1.0-2.0). Verified:
+rebuild + headless boot smoke (presents normally); the functional
+retest needs the real controller in the player's hands.

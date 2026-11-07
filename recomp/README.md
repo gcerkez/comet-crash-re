@@ -22,7 +22,7 @@ To build and run this static recompilation, you **must provide your own legally 
 - **RSX Graphics & Vulkan Acceleration**:
   - Full Vulkan backend with native RSX NV3089 GPU blits and Wayland/X11 swapchain support.
   - Accelerated fragment program and vertex program execution (`PS3RECOMP_VK_GUEST_PROGRAMS=1`).
-  - Viewport & `cellResc` hardware resolution scaling support with pixel-perfect native 720p centering.
+  - Native 1080p output: the present target and window follow the offered video mode.
 - **Input & Controllers**:
   - Full SDL2 GameController support (Sony DualShock 3/4, DualSense, Microsoft Xbox controllers).
   - Dual-motor rumble and haptic support.
@@ -66,7 +66,17 @@ git submodule update --init --recursive
 Obtain your legally dumped, decrypted `EBOOT.ELF` and game folder from your PlayStation 3 console:
 - Title ID: `NPUB30061`
 - `EBOOT.ELF` SHA-256: `a18d8e4a4a2620fd58f7c09e9639f3de91b3197cab3877c554e369dee430a00c`
-- File Size: `2,108,304` bytes
+- File Size: `2,817,600` bytes
+
+### 2b. Assemble the VFS in order
+
+The VFS the launcher uses is an overlay, applied in this order:
+
+1. The full game package's `USRDIR` (base files).
+2. The v1.10 patch package's `USRDIR` on top (it alone carries the `language*.utf` tables).
+3. The Bionic Swarm DLC's `USRDIR/data` merged in (`data3.pak`-`data5.pak`, `dlc1.edat`, `models/expansion/`, levels 94/95/121-130/165-169). The expansion code ships in the base EBOOT; only its assets are in the DLC package (content ID `UP2009-NPUB30061_00-PELFASTCC00DLC00`). Full procedure and evidence: `notes/RECONSTRUCTION-037.md`.
+
+Title-specific runtime fixes applied on top of upstream ps3recomp are catalogued in `recomp/RUNTIME_PATCHES.md` (AA blit gate, quit confirmation, 1080p present size, right-stick range boost).
 
 ### 3. Run Automated Setup & Lift Pipeline
 The `setup.py` script validates your ELF, lifts all PPU functions into C++, extracts and lifts all 11 SPU workloads, generates workload fingerprint dispatchers, and links game data into the VFS:
@@ -131,13 +141,15 @@ The launcher script sets optimal defaults, but you can customize runtime behavio
 
 | Variable | Default | Description |
 |:---|:---|:---|
-| `PS3_VIDEO_RES` | `720` | Output resolution mode (`720` or `1080`). Setting to `720` provides pixel-perfect 1:1 match to the game's internal 3D scene engine. |
+| `PS3_VIDEO_RES` | `1080` | Output resolution mode (`720` or `1080`). The Vulkan present target and window are created at this mode's size (1920x1080 for `1080`); the game renders into matching display buffers when the mode is offered. `720` keeps the original 1280x720 path. |
 | `VK_DRAW_BATCH` | `1` | Batches draw calls before presentation for higher frame rates and reduced CPU overhead. |
 | `PS3RECOMP_VK_GUEST_PROGRAMS` | `1` | Enables GPU compilation of guest RSX fragment and vertex programs. |
 | `PS3RECOMP_VK_WINDOW` | `1` | Creates an interactive Vulkan desktop window. |
 | `MSGDIALOG_ANSWER` | `no` | Auto-answers system message dialogs (e.g. initial network/trophy prompts). |
 | `PS3_VFS_ROOT` | `recomp/vfs` | Path to the virtual file system root containing `USRDIR/` and `PARAM.SFO`. |
 | `PAD_NO_KEYBOARD` | `0` | Set to `1` to disable keyboard fallback mapping. |
+| `PAD_STICK_BOOST` | `1.25` | Right-stick range boost in the pad layer, mimicking DualShock 3 rim saturation; titles with hard-tilt gates near full scale (Comet Crash's unit-send commit needs ~246+/255) are otherwise unreachable on modern pads. `1.0` disables. See `RUNTIME_PATCHES.md` entry 12. |
+| `AUDIO_PEAK` / `AUDIO_RATE` | unset | Audio diagnostics: when set, the cellAudio mixer periodically logs the mixed blocks' peak amplitude and the silent-block percentage. |
 
 ---
 
@@ -146,8 +158,8 @@ The launcher script sets optimal defaults, but you can customize runtime behavio
 1. **SPURS Workload Dispatch**:
    Comet Crash utilizes the Sony SPURS (SPU Runtime System) task queue extensively for pathfinding, collision detection, and swarm AI. This recompilation extracts all 9 embedded job binaries from the `.data` segment of `EBOOT.ELF` and compiles them as native C workloads, invoking them directly on the host CPU thread pool with hardware SSE/AVX vector intrinsics.
 
-2. **Resolution Scaling (`cellResc`) & Viewport Alignment**:
-   Comet Crash's 3D playfield renders to a $1280 \times 720$ offscreen buffer, while querying `cellVideoOutGetResolutionAvailability`. Setting `PS3_VIDEO_RES=720` configures the display pipeline to run at native 720p, eliminating letterbox squishing and ensuring the entire 3D arena fills the display window.
+2. **Resolution & Viewport Alignment**:
+   Comet Crash never calls cellResc. It renders into display buffers at the resolution the video-out configuration offers: 1280x720, or 1920x1080 when `PS3_VIDEO_RES=1080` (the launcher default). The recomp's Vulkan present target and window are created at that same size -- see `RUNTIME_PATCHES.md` entry 11 for why the present size must follow the mode.
 
 3. **Audio & File IO**:
    CellFS calls are mapped directly to the local directory structure. Audio streams (`.at3`, `.vag`, and BGM) are serviced through the HLE `cellAudio` and `cellAtrac` modules.
