@@ -27,8 +27,7 @@ from your own copy**:
   license file itself is never committed.
 - You supply the extracted game data (base package, the 1.10 patch
   tree, and optionally the Bionic Swarm DLC). The build assembles
-  them into a local virtual filesystem; the data never enters git
-  (see `.gitignore`).
+  them into a local virtual filesystem.
 - The recompilation's audio normally requires a codec plugin from
   the PS3 system firmware. This project instead implements that
   plugin **natively on the host** (a clean-room MP3 decoder seam in
@@ -36,11 +35,7 @@ from your own copy**:
   of the project's goals is a build that is fully self-contained
   and freely redistributable apart from the user's own game dump.
 
-The analysis corpus (decompiled output, extracted tables) that
-earlier revisions of this repository carried has been removed from
-the tree and from the git history for the same reason; it lives
-only in the author's private archive. The findings it produced are
-written up, in our own words, in [notes/](notes/).
+The findings it produced are written up, in our own words, in [notes/](notes/).
 
 ## What's here
 
