@@ -144,3 +144,31 @@ three toggles on via env), with live readback/poke through
 - The runtime ADD/SPEND writers of the wallet were not statically
   identifiable; a data watchpoint in a coordinated session could close
   that (not needed for the pin).
+
+## Live-play corrections (Jerry, same day)
+
+Jerry play-tested stage 1 on his desktop and caught three defects:
+
+1. **The AI benefited.** Stockpiles were pinned for slots 0..1 and
+   tech-mask bits for slots 0..3. In Battle, slot 1 of the first build
+   WAS the AI: it sent units endlessly ("AI has infinite resources").
+2. **Slot map corrected empirically.** In the obj+0x300 stat array
+   (stride 0x80), **index 0 is the opponent and index 1 is the local
+   human** -- proven by live pokes in Jerry's session: draining
+   index 0 stopped the AI's sends; filling index 1 gave Jerry his
+   units. Consistent with the wallet seed channel obj+0x3C8 living in
+   index 1. Verified in Battle AND Campaign. The requirement table is
+   safe to zero globally: its pointer is read ONLY inside
+   FUN_0010d390 (the human pad palette interpreter) in the lifted
+   code, so the AI never consults it. The Thorium wallet records are
+   the local player's only (the AI panel showed its normal 1000).
+   Fix: stockpiles + mask pin index 1 only.
+3. **Pin value 100000 -> 9999.** Six digits overflow the HUD Thorium
+   counter and clip the leading digit; 9999 re-pins every frame, so
+   it remains effectively infinite.
+
+Also observed once, unproven: a horizontal strip of GUI-atlas sprites
+(flags, L1/R1 glyphs, meter bars) across mid-screen in Battle with
+the first build's cheats on; gone in a later paused shot after the
+toggles went off. Suspects: the old all-slot mask writes into blocks
+2/3, or the 100000.0f channel pin. Watch on the fixed build.
