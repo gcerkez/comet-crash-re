@@ -231,7 +231,7 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 /* Three toggles (index order fixed; stage 2's in-game Cheats submenu  */
 /* flips them through comet_cheats_flip):                              */
 /*   0 thorium     pin the player's Thorium wallet (both shadow        */
-/*                 records + the float source channel) at 100000       */
+/*                 records + the float source channel) at 9999       */
 /*   1 buildables  neutralise the build palette's requirement table    */
 /*                 and set the two tech-mask bits, so every model      */
 /*                 kind is buildable in every mode                     */
@@ -359,7 +359,7 @@ static void comet_cheats_tick(void)
         fprintf(stderr, "[cheats] requirement table restored\n");
     }
     if (s_cheats[1] && in_match) {
-        for (int p = 0; p < 4; p++) {
+        for (int p = 0; p < 1; p++) {
             uint32_t a = kBase + 0x302 + p * 0x80;
             comet_wr16(a, (uint16_t)(comet_rd16(a) | 0x0030));
         }
@@ -371,13 +371,14 @@ static void comet_cheats_tick(void)
         /* Pin only when both shadow records carry their sentinel, so a
          * different layout can never be written by mistake. */
         if (comet_rd32(kBase + 0x1B0) == 0x7FFFFFFF && comet_rd32(kBase + 0x1D0) == 0x7FFFFFFF) {
-            comet_wr32(kBase + 0x1B4, 100000);
-            comet_wr32(kBase + 0x1D4, 100000);
-            comet_wr32(kBase + 0x3C8, 0x47C35000u); /* 100000.0f */
+            comet_wr32(kBase + 0x1B4, 9999);
+            comet_wr32(kBase + 0x1D4, 9999);
+            float thf = 9999.0f; uint32_t thbits; memcpy(&thbits, &thf, 4);
+            comet_wr32(kBase + 0x3C8, thbits);
         }
     }
     if (s_cheats[2]) {
-        for (int p = 0; p < 2; p++)
+        for (int p = 0; p < 1; p++)
             for (int k = 0; k < 8; k++)
                 comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 999);
     }
