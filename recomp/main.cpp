@@ -252,6 +252,7 @@ static DWORD WINAPI frame_clock(LPVOID)
 #endif
 
     unsigned  last_flip = 0;
+    (void)last_flip;
     ULONGLONG next_tick = GetTickCount64();
 
     for (;;) {
