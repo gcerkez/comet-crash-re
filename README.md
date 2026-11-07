@@ -1,127 +1,125 @@
-# 🎮 Comet Crash — Reconstruction Project
+# Comet Crash — Reconstruction & Recompilation
 
-![Comet Crash icon](assets/icon0.png)
+A reverse-engineering and preservation project for **Comet Crash**
+(Pelfast, PSN 2009), the PlayStation 3 tower-offense game: build and
+upgrade towers to stop waves of alien craft, stockpile units of your
+own, and launch them across the arena to destroy the enemy base
+first. 28-stage campaign, offline co-op, and versus play.
 
-Sony published Pelfast's **Comet Crash** for PlayStation 3 via PSN in 2009.
-It is a tower-defense game with an offensive twist: alongside building and
-upgrading towers (turrets, lasers, missiles) to stop waves of alien craft
-from reaching your base, you build up a comet of your own units and launch
-counterattacks to destroy the enemy base first. It shipped with a 28-stage
-campaign, offline co-op, and competitive multiplayer — and, very much of its
-era, a feature to record gameplay and upload it to YouTube.
+This repository contains **only original work**: a hand-written
+native port, a static-recompilation project that runs the game's
+real code on a PC, the tooling used to analyze the binary, and the
+engineering notes produced along the way.
 
-This repository is a **decompilation-style reconstruction project** for that
-game, modeled on the community reconstruction projects cataloged in
-[awesome-rea-games](https://github.com/HaozheH3/awesome-rea-games): start
-from the shipped binary, recover a complete decompiled corpus, then
-progressively identify, name, and document the game's logic until the
-reconstructed code reads like the program that produced it.
+## Legal model — read this first
 
-**Private research project for a game I own. It contains analysis output
-(decompiled pseudocode, inventories, notes) — not the game's assets or the
-game binary itself.**
+**Nothing proprietary is in this repository.** No game code (source,
+decompiled, or lifted), no game assets, no string tables, no level
+data, no encryption keys or license files, and no PlayStation
+firmware — and none of it is downloaded by the build.
 
-## This project
+Everything derived from the game is **generated locally, by you,
+from your own copy**:
 
-| Component | Resources | What it is |
-|---|---|---|
-| Decrypted executable | [notes/PROVENANCE.md](notes/PROVENANCE.md) | How the NPDRM SELF (`EBOOT.BIN`) was decrypted with scetool + the title's RAP into a plain PPC64 ELF — the artifact everything else is built from. |
-| Analysis corpus | [analysis/](analysis/) | Machine-generated inventories from the binary: 843 functions, 2,005 strings, memory map, plus the REA attempt records. |
-| Decompiled code | [decompiled/decompiled.c](decompiled/decompiled.c) | Ghidra decompilation of **all 843 functions** (~2.3 MB of C pseudocode). Names are `FUN_<address>` placeholders; this is reconstructed logic, not original source. |
-| Reconstruction notes | [notes/](notes/) | Human/AI findings as identification proceeds — start with [RECONSTRUCTION-001](notes/RECONSTRUCTION-001.md) (corpus tour, leaked source-file names, string-guided subsystem map). |
-| Cleaned reconstruction | [reconstruction/](reconstruction/) | Renamed, re-typed, commented code for subsystems we actually understand. Empty for now; grows from the notes. |
-| Native host | [native/](native/) | The C++17 + SDL3 app the reconstruction grows into. Milestone 1: window + frame loop + unified keyboard/mouse/gamepad input (the native stand-in for the original's `sys_io` pad sampling). |
-| Port notes | [notes/NATIVE-PORT-001.md](notes/NATIVE-PORT-001.md) | The module breakdown of the original, the decoded import map (20 libraries / 195 functions), the PS3→native service map, and the port roadmap. |
-| Static recompilation | [recomp/](recomp/) | Full, playable PC static recompilation (`CometCrashRecomp`) targeting Linux x64/Vulkan via ps3recomp with native SPU multi-threading and corrected 720p scaling. |
-| Tooling | [scripts/](scripts/) | The exact Ghidra export script used to produce the corpus, so every artifact here is reproducible. |
+- You supply a decrypted `EBOOT.ELF` from your own game package.
+  The decryption recipe (scetool + your own title license file) is
+  documented in [notes/PROVENANCE.md](notes/PROVENANCE.md); the
+  license file itself is never committed.
+- You supply the extracted game data (base package, the 1.10 patch
+  tree, and optionally the Bionic Swarm DLC). The build assembles
+  them into a local virtual filesystem; the data never enters git
+  (see `.gitignore`).
+- The recompilation's audio normally requires a codec plugin from
+  the PS3 system firmware. This project instead implements that
+  plugin **natively on the host** (a clean-room MP3 decoder seam in
+  the runtime fork), so **no Sony firmware is used anywhere** — one
+  of the project's goals is a build that is fully self-contained
+  and freely redistributable apart from the user's own game dump.
 
-## Reconstruction progress
+The analysis corpus (decompiled output, extracted tables) that
+earlier revisions of this repository carried has been removed from
+the tree and from the git history for the same reason; it lives
+only in the author's private archive. The findings it produced are
+written up, in our own words, in [notes/](notes/).
 
-- ✅ Binary decrypted and verified (PPC64 ELF, entry via OPD at 0x1F2B38)
-- ✅ Full auto-analysis + decompile: 843/843 functions, 0 failures; **867** after discovering a missed 33 KB module (notes/RECONSTRUCTION-005.md)
-- ✅ First-pass findings: leaked source files (`main.c`, `arenaGraphics.cpp`,
-  `ObjectGroup.cpp`, `sound/engine.cpp`, `local_text.cpp`,
-  `fontMapFormat.cpp`), the `gCometEnv` global, weapon/unit model taxonomy,
-  the YouTube upload feature's API key string
-- ✅ Import map decoded from `.lib.stub`: 20 libraries, 195 functions (incl. input = `sys_io`, 6 functions)
-- ✅ Native host milestone 1: builds and runs — SDL3 window, unified keyboard/mouse + hot-plug gamepad input, unit-tested mapper
-- ✅ Startup chain walked: _entry → crt_startup → **main** (0xDAE30), all named in Ghidra; 77 import thunks renamed to SDK names (notes/RECONSTRUCTION-003.md)
-- ✅ FNID pass: **170/195 imports named** and labeled in Ghidra (cellGcmSys/cellSpurs/cellResc complete via RPCS3 HLE tables); corpus exported (notes/RECONSTRUCTION-002.md, RECONSTRUCTION-008.md)
-- ✅ Input seam named: `pads_update` (0x111278) → `pads_sample` (0x110738, per-frame cellPadGetData); original proven pad-only — no built-in keyboard/mouse
-- ✅ Module map v1: corpus split into per-module files under decompiled/by-module/ (MultiStream 66, PSGL 21, local_text 9, C runtime 17, rest unassigned)
-- ✅ Language tables extracted: 265 English strings incl. all menu text (analysis/language/)
-- ✅ Data formats opened: `.pak` archive cracked + extracted (16 MP3 SFX, scripts/extract_pak.py); `.map` format cracked from its parser (level_parse) and verified byte-exact on all 12 maps — native parser implements it (notes/RECONSTRUCTION-006.md)
-- ✅ Frame chain named (main → game_run → game_loop → frame_input → pads_update)
-- ✅ Native host plays the game's own SFX (extracted MP3 bank via minimp3 + SDL audio)
-- ✅ Native host renders the game's own OBJ models in a projected 3D arena scene (COMET_MODEL; notes/RECONSTRUCTION-007.md)
-- ✅ The render chain is traced to the present step: game_loop → render step → frame_present (cellResc convert+flip) → gcm_flip (notes/RECONSTRUCTION-008.md)
-- ✅ Level semantics completed with cross-decomp validation (Stylish-Dark, different build): type-0x0B record = arena extent marker; secondary records = filtered spawn-event list; all 49 unique embedded levels extracted (notes/RECONSTRUCTION-009.md)
-- ✅ **The arena is playable**: native gameplay core (arena_sim) flies the ship on the level grid, spawns the level's own scheduled events, combat + base defense, HUD — verified headlessly on level61 (notes/RECONSTRUCTION-010.md)
-- ✅ Cross-resource audit done; **placement cracked** (primary records sit at raw[2]/raw[3]) and the recovered **construction model** implemented: dormant structures activated by the level script, factory production, funded player builds (notes/RECONSTRUCTION-011.md)
-- ✅ **Mission setup recovered** from the decomp resources: per-kind initial levels + the raw[1] settlement rule, factories = kinds 26/28 with stockpile-and-deploy production, script events as timed construction (notes/RECONSTRUCTION-012.md)
-- ✅ Kind identities mapped (20 Base … 28 Special Ops; units 40–47); **Thorium economy from meteors, ship health/destruction/reset, and the offensive win condition** implemented (notes/RECONSTRUCTION-013.md)
-- ✅ **Rock economy corrected to the real mechanic**: data-driven flying rocks (selectors 20–22, per-rock payouts), ship grab-and-drag, base markers decoded, BFS base-to-base routing with unblockable-path construction (notes/RECONSTRUCTION-014.md)
-- ✅ **Presentation pass**: fixed top-down camera (the map never moves), DDS texture pipeline, the game's own artwork in the scene — textured fighter/scout models, structure billboards, comet-surface ground (notes/RECONSTRUCTION-016.md)
-- ✅ **Full-asset rewire**: the complete base-game package recovered (all 44 registry models); the scene composes the named meshes — comet terrains, articulated structures on platforms, geode rocks (notes/RECONSTRUCTION-017.md, notes/RECONSTRUCTION-018.md)
-- ✅ **Menu-driven data flow + the game's own font**: levels selected in the menus load from the data root; all text in the game's BMFont (Proxima Nova). Camera/HUD geometry still estimates — the code is the definition of truth; its consumers were located in the uncarved setup hub (notes/RECONSTRUCTION-019.md)
-- ⬜ Subsystems clustered and named; first modules in `reconstruction/`
+## What's here
+
+| Path | What it is |
+|---|---|
+| [recomp/](recomp/) | The static recompilation — the playable build. The game's own code, lifted to C++ by ps3recomp, running on a clean-room HLE runtime (Vulkan). See its README for the full quick start. |
+| [third_party/ps3recomp](third_party/) | Submodule: our fork of [ps3recomp](https://github.com/sp00nznet/ps3recomp) (MIT). Upstream runtime plus this project's patches (catalogued in [recomp/RUNTIME_PATCHES.md](recomp/RUNTIME_PATCHES.md)): the native MP3 codec, AA-blit gate, 1080p present sizing, right-stick range boost, quit confirmation, pad-file tooling, log discipline. |
+| [native/](native/) | A hand-written C++17 + SDL3 port, built from the reconstruction notes (menus, input, level parser, playable arena core, the game's own SFX via minimp3). Independent of the recompilation. |
+| [scripts/](scripts/) | Ghidra export/analysis scripts and data extractors (language tables, `.pak` archives) — the tools that produce local analysis artifacts from your dump. |
+| [notes/](notes/) | The engineering log: provenance, subsystem findings, format documentation, and the per-fix records (035–041 cover the recompilation bring-up: rendering, input, DLC, audio). |
+
+## Quick start (the recompilation)
+
+Prerequisites: a Linux x86_64 machine with `cmake`, `ninja`, a C++20
+compiler, Python 3, and the Vulkan + SDL2 development packages
+(exact package lists in [recomp/README.md](recomp/README.md)).
+
+```bash
+git clone --recursive https://github.com/gcerkez/comet-crash-re.git
+cd comet-crash-re/recomp
+
+./setup.sh --eboot /path/to/EBOOT.ELF \
+           --gamedata /path/to/base-game-tree \
+           --patchdata /path/to/patch-1.10-tree \
+           --dlcdata /path/to/bionic-swarm-tree   # optional
+
+./run.sh /path/to/EBOOT.ELF
+```
+
+`setup.py` validates the ELF (SHA-256
+`a18d8e4a4a2620fd58f7c09e9639f3de91b3197cab3877c554e369dee430a00c`,
+2,817,600 bytes, title NPUB30061 v1.10), lifts the PPU and SPU
+code, and assembles the VFS overlay in the order base → patch →
+DLC. `setup.sh` then configures and builds
+`build/CometCrashRecomp`. The game boots to its real menus and
+plays: campaign, battle, the Bionic Swarm expansion toggle, sound,
+and 1080p output included.
+
+The native port builds separately:
+
+```bash
+cd native
+python3 ../scripts/gen_text_table.py   # generates src/language1.inc from your extracted language table
+cmake -B build -G Ninja && cmake --build build
+ctest --test-dir build
+```
+
+## Status
+
+- **Recompilation: playable.** Real menus, campaign and battle
+  modes, construction, unit auto-send, upgrades, the expansion
+  content gate, music and SFX (host codec), 1080p. PlayStation
+  Network features are intentionally stubbed (the original's
+  "Not connected" path).
+- **Native port: partial.** Menus, input (keyboard/mouse +
+  hot-plug gamepads), level parsing, textured 3D arena scene, and
+  a playable gameplay core; some per-weapon rules and the exact
+  HUD glyph layout remain unported. The recompilation is the
+  high-fidelity route.
+- Known open items are tracked in the notes (a first-upgrade
+  color glitch in the recompilation, wireless-DS4 stick range at
+  the default boost, a rare ship-render blip under investigation).
 
 ## The target
 
 | | |
 |---|---|
 | Title | Comet Crash |
-| Title ID | NPUB30061 (US PSN) |
+| Title ID | NPUB30061 (US PSN), version 1.10 |
 | Content ID | UP2009-NPUB30061_00-PELFASTCC0000020 |
-| Binary | `EBOOT.BIN` → decrypted `EBOOT.ELF` |
-| Format | ELF64, big-endian, PowerPC64 (Cell PPU / LV2), statically linked, stripped |
-| Size | 2,817,600 bytes decrypted |
-| Entry point | 0x1F2B38 (an OPD — see notes 001) |
+| Binary | `EBOOT.BIN` (NPDRM SELF) → decrypted `EBOOT.ELF` |
+| Format | ELF64, big-endian, PowerPC64 (Cell PPU / LV2), stripped |
+| Decrypted size | 2,817,600 bytes |
+| Entry point | OPD at 0x1F2B38 (code 0x10230, TOC 0x1FC7C0) |
 
-## Pipeline
+## Repository hygiene
 
-1. **Decrypt** (done): scetool → `EBOOT.ELF`. Full chain in
-   [notes/PROVENANCE.md](notes/PROVENANCE.md).
-2. **Analyze** (done, v1 corpus): Ghidra 12.2 headless, language
-   `PowerPC:BE:64:default`, auto-analysis, then a scripted export
-   (`scripts/ExportReconstruction.java`).
-3. **Reconstruct** (ongoing): read the corpus, name subsystems, write up
-   the game's logic in `notes/`, promote understood code to
-   `reconstruction/`.
-
-### A note on REA
-
-REA (Reverse Engineer Anything, `rea-agents` 6.7.0) is installed on the
-analysis machine and registered with Antigravity, and its Ghidra engine is
-the same one used here — but REA 6.7.0 **rejects this target at intake**
-("unsupported ELF architecture") because its artifact layer does not support
-PowerPC64/Cell LV2 ELFs, even with `--provider ghidra`. The corpus was
-therefore produced by driving Ghidra headless directly. Details and the
-exact error record are in [notes/REA.md](notes/REA.md).
-
-## Repo layout
-
-- `assets/` — the game's icon from the extracted package, for presentation.
-- `analysis/` — machine-generated inventories (`functions.tsv`,
-  `strings.tsv`, `summary.txt`) and the REA attempt records.
-- `decompiled/` — the decompiled C corpus.
-- `notes/` — provenance, REA findings, reconstruction write-ups.
-- `reconstruction/` — cleaned-up reconstructed code (grows over time).
-- `scripts/` — the scripts that produced the corpus.
-
-Not in git (kept on the analysis machine): the decrypted `EBOOT.ELF`, the
-Ghidra project database (`ghidra/`), and the RAP license file — see
-`notes/PROVENANCE.md` for where they live and how they were obtained.
-
-## Reproducing the analysis
-
-On the analysis machine (JerryDesktop):
-
-```bash
-source ~/tools/env.sh   # JAVA_HOME (Temurin 25 for Ghidra 12.2), GHIDRA_INSTALL_DIR, Node 24
-~/tools/ghidra_12.2_PUBLIC/support/analyzeHeadless ~/comet-crash-re/ghidra CometCrashRE \
-  -import ~/Downloads/comet_crash_extracted/EBOOT.ELF \
-  -processor PowerPC:BE:64:default -cspec default \
-  -scriptPath ~/comet-crash-re/scripts \
-  -postScript ExportReconstruction.java ~/comet-crash-re/analysis
-```
+Game-derived files are blocked by `.gitignore` (`*.ELF`, `*.pkg`,
+`*.rap`, `*.edat`, extracted trees, generated tables, lift output,
+VFS, build output). If you fork this: keep it that way. The rule
+for contributions is the legal model above — custom code, patches,
+and documentation only.

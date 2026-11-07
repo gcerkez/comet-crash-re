@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 EXPECTED_SHA256 = "a18d8e4a4a2620fd58f7c09e9639f3de91b3197cab3877c554e369dee430a00c"
-EXPECTED_SIZE = 2108304
+EXPECTED_SIZE = 2817600
 
 # SPU ELF metadata (offset in EBOOT.ELF, length, symbol name, entry offset)
 SPU_ELFS = [
@@ -324,7 +324,23 @@ def lift_spu(eboot_data: bytes, sdk_dir: Path, out_dir: Path):
     print(f"    Wrote {workloads_c}")
 
 
-def setup_vfs(gamedata_path: Path, out_dir: Path):
+def _link_or_copy(src: Path, dst: Path):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists() or dst.is_symlink():
+        if dst.is_dir() and not dst.is_symlink():
+            shutil.rmtree(dst)
+        else:
+            dst.unlink()
+    try:
+        dst.symlink_to(src.resolve())
+    except OSError:
+        if src.is_dir():
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
+
+
+def setup_vfs(gamedata_layers, out_dir: Path):
     print("\n" + "=" * 60)
     print("  STEP 3: Virtual File System Setup (VFS)")
     print("=" * 60)
@@ -334,47 +350,35 @@ def setup_vfs(gamedata_path: Path, out_dir: Path):
     vfs_usrdir = vfs_game / "USRDIR"
     vfs_usrdir.mkdir(parents=True, exist_ok=True)
 
-    if not gamedata_path or not gamedata_path.exists():
-        print(f"[!] No --gamedata directory provided or found.")
+    layers = [p for p in (gamedata_layers or []) if p and p.exists()]
+    if not layers:
+        print("[!] No game data directories provided or found.")
         print(f"    VFS directory created at: {vfs_dir}")
         print(f"    Please place PARAM.SFO in {vfs_game}/ and game assets (USRDIR/) in {vfs_usrdir}/.")
         return
 
-    print(f"[*] Linking game assets from {gamedata_path} -> {vfs_dir}...")
-
-    # Look for PARAM.SFO
-    sfo = None
-    for cand in [gamedata_path / "PARAM.SFO", gamedata_path / "PS3_GAME" / "PARAM.SFO"]:
-        if cand.is_file():
-            sfo = cand
-            break
-
-    if sfo:
-        dst_sfo = vfs_game / "PARAM.SFO"
-        if not dst_sfo.exists():
-            shutil.copy2(sfo, dst_sfo)
-            print(f"    Copied {sfo.name} -> {dst_sfo}")
-
-    # Look for USRDIR
-    src_usrdir = None
-    for cand in [gamedata_path / "USRDIR", gamedata_path / "PS3_GAME" / "USRDIR"]:
-        if cand.is_dir():
-            src_usrdir = cand
-            break
-
-    if src_usrdir:
-        for item in src_usrdir.iterdir():
-            dst_item = vfs_usrdir / item.name
-            if not dst_item.exists():
-                try:
-                    dst_item.symlink_to(item.resolve())
-                    print(f"    Linked {item.name} -> {dst_item}")
-                except OSError:
-                    if item.is_dir():
-                        shutil.copytree(item, dst_item)
-                    else:
-                        shutil.copy2(item, dst_item)
-                    print(f"    Copied {item.name} -> {dst_item}")
+    # Overlay order: base package first, then the patch tree, then
+    # DLC -- later layers win per file, matching how the working
+    # VFS was assembled (notes 037).
+    for layer in layers:
+        print(f"[*] Overlaying {layer} -> {vfs_dir}...")
+        for cand in [layer / "PARAM.SFO", layer / "PS3_GAME" / "PARAM.SFO"]:
+            if cand.is_file():
+                _link_or_copy(cand, vfs_game / "PARAM.SFO")
+                print(f"    PARAM.SFO <- {cand}")
+                break
+        src_usrdir = None
+        for cand in [layer / "USRDIR", layer / "PS3_GAME" / "USRDIR"]:
+            if cand.is_dir():
+                src_usrdir = cand
+                break
+        if src_usrdir:
+            count = 0
+            for item in sorted(src_usrdir.rglob("*")):
+                if item.is_file():
+                    _link_or_copy(item, vfs_usrdir / item.relative_to(src_usrdir))
+                    count += 1
+            print(f"    {count} files from {src_usrdir}")
 
 
 def main():
@@ -392,6 +396,18 @@ def main():
         type=Path,
         default=None,
         help="Path to extracted game directory containing USRDIR/ and PARAM.SFO",
+    )
+    parser.add_argument(
+        "--patchdata",
+        type=Path,
+        default=None,
+        help="Path to extracted 1.10 patch tree (overlaid over --gamedata)",
+    )
+    parser.add_argument(
+        "--dlcdata",
+        type=Path,
+        default=None,
+        help="Path to extracted Bionic Swarm DLC tree (overlaid last)",
     )
     parser.add_argument(
         "--sdk",
@@ -433,7 +449,12 @@ def main():
     eboot_data = validate_eboot(args.eboot.resolve())
     lift_ppu(args.eboot.resolve(), sdk_dir, recomp_dir)
     lift_spu(eboot_data, sdk_dir, recomp_dir)
-    setup_vfs(args.gamedata.resolve() if args.gamedata else None, recomp_dir)
+    layers = [
+        a.resolve()
+        for a in (args.gamedata, args.patchdata, args.dlcdata)
+        if a is not None
+    ]
+    setup_vfs(layers, recomp_dir)
 
     print("\n" + "=" * 60)
     print("  SETUP COMPLETE! Next steps to build:")

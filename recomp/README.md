@@ -78,26 +78,29 @@ The VFS the launcher uses is an overlay, applied in this order:
 
 Title-specific runtime fixes applied on top of upstream ps3recomp are catalogued in `recomp/RUNTIME_PATCHES.md` (AA blit gate, quit confirmation, 1080p present size, right-stick range boost).
 
-### 3. Run Automated Setup & Lift Pipeline
-The `setup.py` script validates your ELF, lifts all PPU functions into C++, extracts and lifts all 11 SPU workloads, generates workload fingerprint dispatchers, and links game data into the VFS:
-```bash
-python3 recomp/scripts/setup.py \
-    --eboot /path/to/extracted/EBOOT.ELF \
-    --game-dir /path/to/extracted/NPUB30061
-```
-
-### 4. Build the Native Binary
-Compile the project with CMake and Ninja:
+### 3. Run the automated setup + build
+`setup.sh` wraps the whole pipeline: it checks prerequisites,
+initializes the submodule, runs `scripts/setup.py` (validates your
+ELF, lifts all PPU functions into C++, extracts and lifts all 11
+SPU workloads, generates the fingerprint dispatch table, and
+assembles the VFS overlay in the order of section 2b), then
+configures and builds:
 ```bash
 cd recomp
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
+./setup.sh --eboot /path/to/extracted/EBOOT.ELF \
+           --gamedata /path/to/base-game-tree \
+           --patchdata /path/to/patch-1.10-tree \
+           --dlcdata /path/to/bionic-swarm-tree
 ```
+`--patchdata` and `--dlcdata` are optional but recommended (the
+patch tree carries the language tables; the DLC enables the
+expansion content). Re-running `setup.sh` skips the lift when its
+output already exists; pass `--force-lift` to regenerate it.
 
-### 5. Launch the Game
-Run the provided launcher script:
+### 4. Launch the Game
+Run the provided launcher script (it takes the ELF path):
 ```bash
-./run.sh
+./run.sh /path/to/extracted/EBOOT.ELF
 ```
 
 ---
