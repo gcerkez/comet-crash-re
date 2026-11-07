@@ -72,3 +72,25 @@ highlights but never commits; a really hard rim push held ~1 s may
 occasionally kick it off), then patch pad_poll_sdl2's axis fill (and
 the XInput fill for symmetry), rebuild, and have him retest with
 the real controller.
+
+## Fix applied (2026-11-07, fork commit 7ade4a86, local)
+
+Implemented as an axial stretch about the centre rather than a
+radial one — a radial gain cannot help the 45° diagonal case (the
+vector magnitude is already at the rim there; it is the per-axis
+bytes that fall short, exactly where the DS3's square saturation
+differs). `pad_boost_right_axis()` in libs/input/cellPad.c stretches
+the right stick's bytes about 128 (default ×1.25, clamped 0–255) in
+both the SDL and XInput fills; PAD_STICK_BOOST overrides the gain
+(1.0 = off). Worked values: byte 218 → 240 (diagonal pair magnitude
+1.19 > 0.9 ✓), byte 236 → 255 ✓, centre and deadzone outputs stay
+128. The left stick is deliberately untouched (a gain there would
+change ship feel; nothing gates on it). One build trap worth
+recording: the helper must live OUTSIDE the `#if PAD_BACKEND_*`
+sections — anchored after PAD_STICK_DEADZONE it landed inside the
+XInput guard and the SDL2 build failed with an implicit
+declaration; it now sits before the backend banners. Verified by
+rebuild + a headless boot smoke (1,440 frames presented, no
+errors). The functional verdict needs Jerry's hands on the real
+controller: tilt to a built unit type, hold ~1 s, and the type
+should lock and keep sending until the pool empties.
