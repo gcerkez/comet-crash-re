@@ -175,9 +175,9 @@ def lift_ppu(eboot_path: Path, sdk_dir: Path, out_dir: Path):
     recomp_dir.mkdir(parents=True, exist_ok=True)
 
     img_prefix = inter_dir / "EBOOT"
-    image_json = inter_dir / "EBOOT.image.json"
-    funcs_json = inter_dir / "EBOOT.functions.json"
-    imports_json = inter_dir / "EBOOT.imports.json"
+    image_json = img_prefix / "EBOOT.image.json"
+    funcs_json = img_prefix / "EBOOT.functions.json"
+    imports_json = img_prefix / "EBOOT.imports.json"
     full_funcs_json = inter_dir / "functions_full.json"
 
     # Step 1a: Loader
