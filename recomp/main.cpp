@@ -254,7 +254,9 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 /* requirement table at guest 0x17F330 holds 28 records of 20 bytes    */
 /* (first word = required level, indexed (kind-20)*20); the tech       */
 /* mask u16 is at +0x302+p*0x80 (bits 4/5 gate kinds 32/27); unit      */
-/* stockpile u16s at +0x364+p*0x80+k*2.                                */
+/* stockpile u16s at +0x364+p*0x80+k*2; the player's life is
+/* the i16 at block +0x58 (human +0x3D8), its maximum the i16 at
+/* +0x3530+p*2 (human +0x3532).                                */
 /* ------------------------------------------------------------------ */
 #define COMET_CHEAT_COUNT 4
 static int s_cheats[COMET_CHEAT_COUNT] = { 0, 0, 0, 0 };
@@ -408,7 +410,18 @@ static void comet_cheats_tick(void)
             for (int k = 0; k < 8; k++)
                 comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 60);
     }
+    if (s_cheats[3]) {
+        /* Infinite Health: pin the local player's current life to its
+         * per-match maximum (see the address notes at the top of this
+         * section). 2-byte write only -- the neighbouring i16 at
+         * +0x3DA is the units-waiting counter. When the max reads 0
+         * the match has not been filled in yet; skip. */
+        int16_t max_life = (int16_t)comet_rd16(kBase + 0x3532);
+        if (max_life > 0)
+            comet_wr16(kBase + 0x3D8, (uint16_t)max_life);
+    }
 }
+
 
 static void comet_crash_camera_tick(void)
 {
