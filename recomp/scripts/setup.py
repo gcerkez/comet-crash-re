@@ -186,14 +186,17 @@ def lift_ppu(eboot_path: Path, sdk_dir: Path, out_dir: Path):
         "Loading ELF segments, exports, and imports...",
     )
 
-    # Step 1b: Function discovery
+    # Step 1b: Function discovery (the tool reads the ELF itself;
+    # the loader's function list seeds it via --seed-json)
     run_cmd(
         [
             sys.executable,
             str(find_functions),
-            str(image_json),
+            str(eboot_path),
+            "--seed-json",
             str(funcs_json),
-            "-o",
+            "--json",
+            "--output",
             str(full_funcs_json),
         ],
         "Discovering PPU subroutines and basic blocks...",
@@ -204,11 +207,14 @@ def lift_ppu(eboot_path: Path, sdk_dir: Path, out_dir: Path):
         [
             sys.executable,
             str(ppu_lifter),
-            str(image_json),
+            str(eboot_path),
+            "--functions",
             str(full_funcs_json),
             "--hle-stubs",
             str(imports_json),
-            "-o",
+            "--jobs",
+            str(os.cpu_count() or 4),
+            "--output",
             str(recomp_dir),
         ],
         "Lifting PPU functions into C++ source chunks...",
@@ -237,7 +243,7 @@ def lift_spu(eboot_data: bytes, sdk_dir: Path, out_dir: Path):
         lift_json = target_dir / "lift.json"
 
         run_cmd(
-            [sys.executable, str(find_spu_funcs), str(raw_path), "-o", str(funcs_json)],
+            [sys.executable, str(find_spu_funcs), str(raw_path), "--out", str(funcs_json)],
             f"Analyzing SPU ELF {elf['name']}...",
         )
         run_cmd(
@@ -245,10 +251,11 @@ def lift_spu(eboot_data: bytes, sdk_dir: Path, out_dir: Path):
                 sys.executable,
                 str(spu_lifter),
                 str(raw_path),
+                "--functions",
                 str(funcs_json),
-                "-o",
+                "--output",
                 str(target_dir),
-                "--prefix",
+                "--symbol-prefix",
                 f"{elf['name']}_",
                 "--report",
                 str(lift_json),
@@ -263,16 +270,29 @@ def lift_spu(eboot_data: bytes, sdk_dir: Path, out_dir: Path):
         raw_path = target_dir / "job.bin"
         raw_path.write_bytes(eboot_data[job["offset"] : job["offset"] + job["size"]])
 
+        job_funcs_json = target_dir / "functions.json"
+        run_cmd(
+            [
+                sys.executable,
+                str(find_spu_funcs),
+                "--raw",
+                "--base",
+                "0",
+                str(raw_path),
+                "--out",
+                str(job_funcs_json),
+            ],
+            f"Analyzing SPURS job {job['name']}...",
+        )
         cmd = [
             sys.executable,
             str(spu_lifter),
-            "--raw",
-            "--entry",
-            "0",
             str(raw_path),
-            "-o",
+            "--functions",
+            str(job_funcs_json),
+            "--output",
             str(target_dir),
-            "--prefix",
+            "--symbol-prefix",
             f"{job['name']}_",
         ] + job["extra_args"]
 

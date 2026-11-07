@@ -31,8 +31,8 @@ endif()
 #         -DRECOMP_DIR=/path/to/my_game/recompiled
 #
 if(NOT DEFINED PS3RECOMP_DIR)
-    # Default: this project is still sitting inside ps3recomp/templates/project/
-    get_filename_component(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../" ABSOLUTE)
+    # Default: the ps3recomp fork submodule at the repository root.
+    get_filename_component(PS3RECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ps3recomp" ABSOLUTE)
 endif()
 get_filename_component(PS3RECOMP_DIR "${PS3RECOMP_DIR}" ABSOLUTE)
 

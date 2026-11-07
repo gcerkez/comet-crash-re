@@ -19,6 +19,8 @@
 #      overlay (base -> 1.10 patch -> DLC) under vfs/.
 #      Skipped when a lift already exists; pass --force-lift to redo.
 #   4. Configures and builds build/CometCrashRecomp.
+# Pass --deps first to install system + Python dependencies via
+# install-deps.sh (apt/dnf/pacman) before anything else.
 #
 # Launch afterwards with:  ./run.sh /path/to/EBOOT.ELF
 set -euo pipefail
@@ -27,14 +29,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 FORCE_LIFT=0
+DO_DEPS=0
 ARGS=()
 for a in "$@"; do
     if [ "$a" = "--force-lift" ]; then
         FORCE_LIFT=1
+    elif [ "$a" = "--deps" ]; then
+        DO_DEPS=1
     else
         ARGS+=("$a")
     fi
 done
+
+if [ "$DO_DEPS" = 1 ]; then
+    echo "[*] Installing dependencies (install-deps.sh)..."
+    "$SCRIPT_DIR/install-deps.sh"
+fi
 
 echo "[*] Checking prerequisites..."
 missing=0
@@ -82,7 +92,7 @@ PYEOF
 fi
 
 echo "[*] Configuring (Ninja, RelWithDebInfo)..."
-cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/build" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/build" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPS3RECOMP_DIR="$REPO_ROOT/third_party/ps3recomp"
 
 echo "[*] Building CometCrashRecomp..."
 cmake --build "$SCRIPT_DIR/build" -j"$(nproc)"
