@@ -159,12 +159,12 @@ static void comet_crash_camera_tick(void)
     static int s_lock_zoom = -1;
     if (s_lock_zoom < 0) {
         const char* e = getenv("CC_LOCK_ZOOM");
-        s_lock_zoom = e ? atoi(e) : 1;
+        s_lock_zoom = e ? atoi(e) : 0;
     }
     static int s_force_overview = -1;
     if (s_force_overview < 0) {
         const char* e = getenv("CC_FORCE_OVERVIEW");
-        s_force_overview = e ? atoi(e) : 1;
+        s_force_overview = e ? atoi(e) : 0;
     }
 
     uint32_t zoom_addr   = kGameBase + 0x005520D8;
@@ -172,11 +172,11 @@ static void comet_crash_camera_tick(void)
     uint32_t ship_addr   = kGameBase + 0x00552070;
     uint32_t state_addr  = kGameBase + 0x005520C0;
 
-    if (s_lock_zoom) {
+    if (s_lock_zoom > 0) {
         uint32_t zero = 0;
         *(uint32_t*)(vm_base + zoom_addr) = zero;
     }
-    if (s_force_overview) {
+    if (s_force_overview > 0) {
         *(uint8_t*)(vm_base + follow_addr) = 0;
     }
 
