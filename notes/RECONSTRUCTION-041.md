@@ -172,3 +172,61 @@ Also observed once, unproven: a horizontal strip of GUI-atlas sprites
 the first build's cheats on; gone in a later paused shot after the
 toggles went off. Suspects: the old all-slot mask writes into blocks
 2/3, or the 100000.0f channel pin. Watch on the fixed build.
+
+## Stage 2 — the in-game Cheats menu (2026-11-07, later)
+
+The toggles moved into the game's own UI. Design constraints from
+the corpus work above: op_dispatch (FUN_000f6990) bounds opcodes at
+<= 100 and reads the GUEST jump table at runtime, so new behaviour
+must be intercepted in the lifted host code ahead of the table read;
+sliders bypass op_dispatch entirely, so rows are push-button items;
+and the shipped game has no "Cheats" string, so labels are planted
+in guest memory by the glue (0x21010000, all <= 15 chars, SSO-only).
+
+As built (RUNTIME_PATCHES #14): Options gains "Cheats" after
+Credits (opcode 31); the submenu mirrors the Video Record builder
+(FUN_000fa0b4) and shows four rows — Thorium / Buildables /
+Stockpiles / Health — labelled with live state at build time, so
+labels refresh on reopen; opcodes 14/30/37/47 flip the glue toggles.
+Health shipped as a state-only row at first (field unknown).
+
+**Pause menu (RUNTIME_PATCHES #15).** Pause -> Settings is a
+separate builder (FUN_000f88c8, opcode 74), not a gated variant of
+Options. Edit 6 appends the same Cheats item at its tail
+(loc_000F8B7C, temp gpr[1]+0x86C, pointer in gpr[20] — gpr[19] is
+load-bearing there). Everything else is shared with the Options
+path.
+
+**Infinite Health — field found and pin wired.** The heart readout
+is "life": -1 per enemy unit entering your base (tutorial string
+144). Current life is the i16 at stat block +0x58 (human guest
+0x30E9D8); its per-match maximum is the i16 array at obj+0x3530+p*2
+(human 0x311B32). Evidence: three independent readers (HUD panel
+FUN_00146b98 decompiled.c:181824-181825, results screen
+FUN_0013e4d8 computing "Base Hits = max - current", a timer
+widget), the elimination check FUN_000dedb0 testing block+0x58 < 1
+(124250), and its per-frame snapshot copy to obj+0x3538+p*2 (124465)
+— downstream only, never a pin target. The max's source differs per
+mode (campaign mission config; Battle's "Max Hits" setting), so the
+pin reads it live: current := max each tick, 2-byte writes only
+(block+0x5A is the units-waiting counter), skipped while max < 1.
+Live verification (driven Campaign, Kreios L1): fields read 25/25;
+an external poke of current to 7 persisted unpinned and the
+snapshot followed within a frame; poking 0 ended the match
+(elimination reads this field). With the pin on, external pokes to
+7 and 3 were restored to 25 within 3 s. The two writer stores
+(match-start fill, per-leak -1) were NOT located — they most likely
+live in the uncarved frame_input state-handler gap
+(0xE2F6C–0xE36E0); the field itself is settled by the readers plus
+the live tests.
+
+**Driven verification of the menu build** (one headless session):
+main Options shows Cheats after Credits; submenu rows render with
+correct state; Thorium flip On->Off->On reads back on reopen;
+Campaign to state 13; pause -> Settings shows Cheats fifth; the
+submenu opens from pause and a Health flip made there reads back
+On. No crashes. Still not visually captured in driven runs: the
+R1 build palette under All Buildables (the palette renders at the
+ship; the driven camera sits at the enemy base) — gate inputs were
+verified in memory in stage 1, and the palette is exercised in
+Jerry's own play.

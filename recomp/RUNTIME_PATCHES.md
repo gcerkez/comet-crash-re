@@ -154,3 +154,59 @@ pinned the mixer at full scale. Verified by AUDIO_PEAK: menu
 music decodes continuously (417-byte first frame, 104-byte VBR
 frames after, as encoded) with living peak levels.
 PS3_NO_HOST_CODEC=1 restores the stub; PS3_CODEC_LOG=1 traces.
+
+
+## 14. Guest Cheats submenu in Options (lift patch, stage 2)
+
+The lifted menu cluster (one host function, func_000F6990) is
+patched by recomp/scripts/patch_lift_cheats.py, applied by setup.py
+after every fresh lift (assert-anchored, idempotent). Four edits:
+
+1. The Options builder gains a "Cheats" item after Credits
+   (opcode 31), mirroring the Credits append but with a planted
+   label -- the game has no "Cheats" string of its own.
+2. op_dispatch intercepts five opcodes the guest table leaves on
+   its no-op handler, ahead of the table read: 31 builds the Cheats
+   submenu; 14/30/37/47 flip the Thorium / Buildables / Stockpiles /
+   Health toggles in the glue (comet_cheats_flip).
+3. The submenu builder mirrors the game's own Video Record submenu
+   (guest FUN_000fa0b4) construction: same container ctor, title
+   setter, append calls and layout/push tail, with one row per
+   toggle. Row labels are chosen at build time from the live toggle
+   state ("Thorium: On" / "Thorium: Off"), so a flip shows on the
+   next open; flips do not rebuild the open menu.
+4. Labels live in guest memory at 0x21010000, planted by the glue on
+   its first tick -- above the ELF image and the runtime's inject
+   window, below the SPU windows, in a range the game never
+   addresses. All labels are <= 15 chars, so the game's string type
+   stays in its small-string form (no heap, no destructor risk).
+   Toggle state itself lives in the glue (env / control file /
+   comet_cheats_get), never in guest memory.
+
+Verified in driven sessions: the Options menu shows Cheats after
+Credits; the submenu renders the four rows with correct On/Off
+state; flips take effect immediately and read back correctly on
+reopen; the stage-1 pins engage from menu flips exactly as from
+env/file control.
+
+
+## 15. Cheats entry in the pause menu's Settings (lift patch, Edit 6)
+
+The in-game pause menu's Settings screen is a separate builder
+(guest FUN_000f88c8, dispatch opcode 74), not the Options builder
+with items gated off -- the Zoom/Language/Credits appends simply do
+not exist in it. Edit 6 of patch_lift_cheats.py appends the same
+opcode-31 "Cheats" item at that builder's convergent tail
+(loc_000F8B7C), after its four stock items. Differences from the
+Options append, both forced by that builder: the string temp is
+gpr[1]+0x86C (free there; its fields are unreferenced in the
+builder) and the temp pointer travels in gpr[20], because gpr[19]
+carries the item-vector pointer in F88C8's tail. The submenu build,
+the opcode intercepts and the planted labels are shared with
+entry 14, so the Cheats screen reached from pause is the same one,
+and a flip made from pause applies to the paused match at once
+(the pins gate on game states 13/14).
+
+Verified in a driven session: pause -> Settings shows Cheats as the
+fifth item; the submenu opens over the paused game; a flip made
+there (Health Off -> On) reads back correctly on reopen.
