@@ -132,3 +132,25 @@ deadzones are untouched; the left stick is left alone. The gain is
 tunable via PAD_STICK_BOOST (1.0 = off, clamped 1.0-2.0). Verified:
 rebuild + headless boot smoke (presents normally); the functional
 retest needs the real controller in the player's hands.
+
+
+## 13. Native host MP3 codec at the MultiStream PIC seam (notes 039/040)
+
+The game's audio is all MP3, decoded by MultiStream calling a
+codec plugin it loads from /dev_flash/sys/external/flashMP3.pic.
+This project uses no Sony firmware, so the plugin is implemented
+on the host: when spu_indirect_branch reaches the codec entry
+range [0x1A900, 0x21000), ps3_spu_mp3_pic_invoke()
+(runtime/spu/spu_mp3_codec.c) answers with the protocol the
+lifted caller expects -- param+0x00 = bytes consumed (every
+return), param+0x10 = PCM bytes, r3 = PCM address in the
+codec-owned LS range at 0x1C900 or 0 for "no complete frame".
+Decoding is minimp3 (public domain, vendored at
+runtime/spu/minimp3.h). Two details cost a test cycle each: site
+A's priming call ignores the returned pointer, so a frame decoded
+there is held for the site-B call; and the PCM must be written
+big-endian (the real plugin is SPU code) -- little-endian samples
+pinned the mixer at full scale. Verified by AUDIO_PEAK: menu
+music decodes continuously (417-byte first frame, 104-byte VBR
+frames after, as encoded) with living peak levels.
+PS3_NO_HOST_CODEC=1 restores the stub; PS3_CODEC_LOG=1 traces.

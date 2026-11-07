@@ -93,6 +93,43 @@ headers). Nothing downstream verifies the load succeeded before
 the SPU task starts calling the entry — so the host hook does not
 need to fabricate a file or an ELF; the loader can keep failing.
 
+## Implementation and outcome (2026-11-07)
+
+Implemented as specified: `ps3_spu_mp3_pic_invoke()` in
+runtime/spu/spu_mp3_codec.c (fork c91413e3), dispatched from the
+stub block in spu_channels.c for targets in [0x1A900, 0x21000),
+decoding with vendored minimp3. A pre-implementation probe
+(PS3_CODEC_PROBE, fork ce04b9ac) captured 32 live calls and
+confirmed the statics, and a second lifted-code pass corrected
+two offsets from the first spec: the caller's "consumed" field is
+param+0x00 (not +0x20) and the flush/chunk-size field is
+param+0x10 (not +0x30) — both earlier numbers were stack-relative
+misreadings (the param block sits at sp+32).
+
+The return protocol, as built: r3 = LS address of the PCM
+(codec-owned 0x1C900) on success, 0 when no complete frame is
+available; w0 (param+0x00) = bytes consumed, written on every
+return; w4 (param+0x10) = PCM byte count. Site A's priming frame
+is held and re-offered at site B (site A ignores the pointer).
+Per-stream minimp3 state is keyed on r7. Input discipline: only
+complete frames are consumed (the caller re-stages the rest).
+
+Verified in two 60 s headless runs (AUDIO_PEAK + PS3_CODEC_LOG):
+the menu stream decodes continuously — first frame 417 B
+consumed, then 104 B frames, which an offline walk of the
+extracted soundtrack MP3s confirmed is exactly how those files
+are encoded (417-byte header frame, then 104-byte VBR frames).
+First build shipped little-endian PCM: the mixer pinned at peak
+1.0000 for 40 s (byte-swapped quiet-track samples become
+near-full-scale noise). The PIC is SPU code, so its PCM is
+big-endian; swapping on emit (fork 926c6123) produced 43 distinct
+peak levels in the retest and zero full-scale samples — living
+audio levels over the same frames. The remaining unknown from
+the spec (exact PCM format) resolved as int16 big-endian
+interleaved, matching every observed number. Jerry's ear test in
+real gameplay is the final confirmation; SFX streams ride the
+same path.
+
 ## Open questions (for the probe)
 
 Two things statics could not pin: (1) r3's exact out-semantics in
