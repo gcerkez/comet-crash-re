@@ -300,6 +300,19 @@ static void comet_crash_camera_tick(void)
     }
 }
 
+/* The Vulkan backend asks before honouring a window quit (close button
+ * or Escape): quitting mid-run throws the run away, so the arena states
+ * -- 13 (gameplay) and 14 (pause / battle end) -- need confirmation.
+ * Menus and loading quit immediately. Guest state word: DAT_005520C0,
+ * read exactly as comet_crash_camera_tick reads it. */
+extern "C" int ps3_host_quit_needs_confirm(void)
+{
+    if (!vm_base) return 0;
+    static const uint32_t kStateAddr = 0x0030E600u + 0x005520C0u;
+    const uint32_t state = __builtin_bswap32(*(const uint32_t*)(vm_base + kStateAddr));
+    return state == 13 || state == 14;
+}
+
 static void present_guest_frame(void)
 {
     comet_crash_camera_tick();
