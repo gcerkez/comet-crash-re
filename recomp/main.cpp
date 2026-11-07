@@ -228,15 +228,16 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 /* ------------------------------------------------------------------ */
 /* Comet Crash cheats -- stage 1: host-side effects.                   */
 /*                                                                     */
-/* Three toggles (index order fixed; stage 2's in-game Cheats submenu  */
+/* Four toggles (index order fixed; stage 2's in-game Cheats submenu   */
 /* flips them through comet_cheats_flip):                              */
 /*   0 thorium     pin the player's Thorium wallet (both shadow        */
 /*                 records + the float source channel) at 9999       */
 /*   1 buildables  neutralise the build palette's requirement table    */
 /*                 and set the two tech-mask bits, so every model      */
 /*                 kind is buildable in every mode                     */
-/*   2 stockpiles  pin unit stockpiles so produced unit types can      */
-/*                 be sent indefinitely                                */
+/*   2 stockpiles  pin unit stockpiles (60 per type) so produced       */
+/*                 unit types can be sent indefinitely                 */
+/*   3 health      pin the player's base health at its maximum         */
 /*                                                                     */
 /* Initial state comes from CC_CHEAT_THORIUM / CC_CHEAT_BUILDABLES /   */
 /* CC_CHEAT_STOCKPILES (set and not "0" = on). A control file          */
@@ -255,9 +256,9 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 /* mask u16 is at +0x302+p*0x80 (bits 4/5 gate kinds 32/27); unit      */
 /* stockpile u16s at +0x364+p*0x80+k*2.                                */
 /* ------------------------------------------------------------------ */
-#define COMET_CHEAT_COUNT 3
-static int s_cheats[COMET_CHEAT_COUNT] = { 0, 0, 0 };
-static const char *const s_cheat_names[COMET_CHEAT_COUNT] = { "thorium", "buildables", "stockpiles" };
+#define COMET_CHEAT_COUNT 4
+static int s_cheats[COMET_CHEAT_COUNT] = { 0, 0, 0, 0 };
+static const char *const s_cheat_names[COMET_CHEAT_COUNT] = { "thorium", "buildables", "stockpiles", "health" };
 
 static uint32_t comet_rd32(uint32_t guest_addr)
 {
@@ -293,13 +294,13 @@ static void comet_cheats_poll(void)
     if (!s_init) {
         s_init = 1;
         const char *envs[COMET_CHEAT_COUNT] = {
-            getenv("CC_CHEAT_THORIUM"), getenv("CC_CHEAT_BUILDABLES"), getenv("CC_CHEAT_STOCKPILES")
+            getenv("CC_CHEAT_THORIUM"), getenv("CC_CHEAT_BUILDABLES"), getenv("CC_CHEAT_STOCKPILES"), getenv("CC_CHEAT_HEALTH")
         };
         for (int i = 0; i < COMET_CHEAT_COUNT; i++)
             if (envs[i] && envs[i][0] && strcmp(envs[i], "0") != 0) s_cheats[i] = 1;
-        if (s_cheats[0] || s_cheats[1] || s_cheats[2])
-            fprintf(stderr, "[cheats] env: thorium=%d buildables=%d stockpiles=%d\n",
-                    s_cheats[0], s_cheats[1], s_cheats[2]);
+        if (s_cheats[0] || s_cheats[1] || s_cheats[2] || s_cheats[3])
+            fprintf(stderr, "[cheats] env: thorium=%d buildables=%d stockpiles=%d health=%d\n",
+                    s_cheats[0], s_cheats[1], s_cheats[2], s_cheats[3]);
     }
     if ((++s_frame % 30) != 0) return;
     const char *path = getenv("CC_CHEATS_FILE");
@@ -328,8 +329,30 @@ static void comet_cheats_poll(void)
     }
     fclose(f);
     if (changed)
-        fprintf(stderr, "[cheats] file: thorium=%d buildables=%d stockpiles=%d\n",
-                s_cheats[0], s_cheats[1], s_cheats[2]);
+        fprintf(stderr, "[cheats] file: thorium=%d buildables=%d stockpiles=%d health=%d\n",
+                s_cheats[0], s_cheats[1], s_cheats[2], s_cheats[3]);
+}
+
+/* Stage 2: plant the Cheats menu's label strings in the unclaimed
+   guest window at 0x21010000 (above the runtime's HLE inject window,
+   below the SPU windows). The lifted menu patch reads them from
+   there; the game itself never generates addresses in that range. */
+static void comet_cheats_plant_labels(void)
+{
+    static int s_planted = 0;
+    if (s_planted) return;
+    s_planted = 1;
+    static const struct { uint32_t off; const char *text; } kLabels[] = {
+        { 0x000, "Cheats" },
+        { 0x020, "Thorium: On" },    { 0x040, "Thorium: Off" },
+        { 0x060, "Buildables: On" }, { 0x080, "Buildables: Off" },
+        { 0x0A0, "Stockpiles: On" }, { 0x0C0, "Stockpiles: Off" },
+        { 0x0E0, "Health: On" },     { 0x100, "Health: Off" },
+    };
+    for (unsigned i = 0; i < sizeof kLabels / sizeof kLabels[0]; i++)
+        memcpy(vm_base + 0x21010000 + kLabels[i].off, kLabels[i].text,
+               strlen(kLabels[i].text) + 1);
+    fprintf(stderr, "[cheats] menu labels planted at guest 0x21010000\n");
 }
 
 static void comet_cheats_tick(void)
@@ -338,6 +361,7 @@ static void comet_cheats_tick(void)
     static uint32_t s_req_orig[28];
     static int s_req_patched = 0;
     if (!vm_base) return;
+    comet_cheats_plant_labels();
     comet_cheats_poll();
 
     uint32_t state = comet_rd32(kBase + 0x005520C0);

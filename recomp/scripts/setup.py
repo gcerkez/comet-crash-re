@@ -396,6 +396,20 @@ def setup_vfs(gamedata_layers, out_dir: Path):
             print(f"    {count} files from {src_usrdir}")
 
 
+def apply_lift_patches(recomp_dir: Path):
+    """Apply source patches to the freshly lifted code (idempotent).
+
+    Currently: the cheats stage-2 patch (guest Cheats submenu in the
+    game's Options menu), implemented by patch_lift_cheats.py beside
+    this file. The patch script is assert-anchored and exits cleanly
+    when the lift is already patched.
+    """
+    script = Path(__file__).resolve().parent / "patch_lift_cheats.py"
+    target = recomp_dir / "recompiled" / "ppu_recomp_000.cpp"
+    print("\n--- Applying lift patches ---")
+    run_cmd([sys.executable, str(script), str(target)], "patch lifted PPU code")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Lift Comet Crash (NPUB30061) into a buildable C++ recompilation project."
@@ -463,6 +477,7 @@ def main():
 
     eboot_data = validate_eboot(args.eboot.resolve())
     lift_ppu(args.eboot.resolve(), sdk_dir, recomp_dir)
+    apply_lift_patches(recomp_dir)
     lift_spu(eboot_data, sdk_dir, recomp_dir)
     layers = [
         a.resolve()
