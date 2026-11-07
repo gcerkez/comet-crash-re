@@ -239,20 +239,15 @@ def lift_spu(eboot_data: bytes, sdk_dir: Path, out_dir: Path):
         raw_path = target_dir / "image.elf"
         raw_path.write_bytes(eboot_data[elf["offset"] : elf["offset"] + elf["size"]])
 
-        funcs_json = target_dir / "functions.json"
         lift_json = target_dir / "lift.json"
 
-        run_cmd(
-            [sys.executable, str(find_spu_funcs), str(raw_path), "--out", str(funcs_json)],
-            f"Analyzing SPU ELF {elf['name']}...",
-        )
         run_cmd(
             [
                 sys.executable,
                 str(spu_lifter),
                 str(raw_path),
-                "--functions",
-                str(funcs_json),
+                "--auto-functions",
+                str(raw_path),
                 "--output",
                 str(target_dir),
                 "--symbol-prefix",
