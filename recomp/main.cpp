@@ -172,6 +172,21 @@ extern "C" int  rsx_null_backend_pump_messages(void);
 #define WINDOW_WIDTH  1280
 #define WINDOW_HEIGHT 720
 
+/* The backend's present target and window are created once, at this size,
+ * and never resized afterwards -- so the size has to match the mode the
+ * guest will actually present. PS3_VIDEO_RES is the same switch the
+ * cellVideoOut HLE reads when it decides which modes to offer the guest:
+ * "1080" offers (and this title selects) 1920x1080, so init the backend
+ * at 1920x1080 too; anything else keeps the 1280x720 default. Without
+ * this, a 1080p guest frame is downscaled into a 720p present target on
+ * every flip and the "1080p" output is a 720p picture stretched back up. */
+static void comet_window_size(int* w, int* h)
+{
+    const char* r = getenv("PS3_VIDEO_RES");
+    if (r && strcmp(r, "1080") == 0) { *w = 1920; *h = 1080; }
+    else { *w = WINDOW_WIDTH; *h = WINDOW_HEIGHT; }
+}
+
 /* ---------------------------------------------------------------------------
  * Frame clock
  * -----------------------------------------------------------------------*/
@@ -338,7 +353,9 @@ static DWORD WINAPI frame_clock(LPVOID)
     const char* title = getenv("PS3_TITLE");
     if (!title || !*title) title = "ps3recomp";
 
-    int rsx_ok = (rsx_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0);
+    int win_w, win_h;
+    comet_window_size(&win_w, &win_h);
+    int rsx_ok = (rsx_backend_init(win_w, win_h, title) == 0);
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME,
             rsx_ok ? "OK -- window open" : "FAILED");
 #if defined(PS3RECOMP_RSX_VULKAN)
