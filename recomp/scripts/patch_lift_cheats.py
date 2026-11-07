@@ -13,6 +13,12 @@ notes/RECONSTRUCTION-041 and cc-cheat-investigation/stage2_liftmap.md):
 - Edit 4 appends a "Cheats" item (opcode 31) after Credits in the
   Options builder, mirroring the Credits append exactly but with a
   planted label (the game has no "Cheats" string).
+- Edit 6 appends the same "Cheats" item (opcode 31) in the pause
+  menu's Settings builder (guest FUN_000f88c8, dispatch opcode 74 —
+  a separate builder from Options, not a gated variant), inserted at
+  the builder's convergent tail (loc_000F8B7C) with its own free
+  string temp (gpr[1]+0x86C) and gpr[20] as the temp pointer (gpr[19]
+  carries the item-vector pointer in that builder's tail).
 - loc_cheats_build mirrors the Video Record builder (loc_000FA0B4)
   construction idiom, minus its state-gating: alloc -> ctor -> title
   -> 4 state-labelled toggle rows -> layout/push tail verbatim.
@@ -25,8 +31,9 @@ notes/RECONSTRUCTION-041 and cc-cheat-investigation/stage2_liftmap.md):
   (push semantics untraced; labels refresh when the submenu reopens,
   exactly how the Video Record flow re-derives state on open).
 
-Assert-anchored and idempotent: if the CHEATS PATCH marker is already
-present, exits 0 without changes. Usage:
+Assert-anchored and idempotent per edit: a file with the stage-2
+edits but without Edit 6 gets only Edit 6; a fully patched file
+exits 0 without changes. Usage:
     patch_lift_cheats.py <path-to-ppu_recomp_000.cpp>
 """
 import sys
@@ -34,8 +41,59 @@ import sys
 PATH = sys.argv[1]
 src = open(PATH).read()
 
-if "CHEATS PATCH" in src:
+EDIT6_MARKER = 'CHEATS PATCH: append the "Cheats" item (pause Settings)'
+
+def apply_edit6(s):
+    """Append the "Cheats" item (opcode 31) in the pause Settings
+    builder (guest FUN_000f88c8), at its convergent tail loc_000F8B7C.
+    Mirrors Edit 4 with the differences that builder requires: string
+    temp gpr[1]+0x86C (free in that builder; its fields +0x870/+0x880/
+    +0x884 are likewise unreferenced there), temp pointer in gpr[20]
+    (gpr[19] carries the item-vector pointer in F88C8's tail; gpr[20]
+    is dead after the Effects slider fixup), and lr values from
+    F88C8's own last append pair (D9218 site 0xF8B2C, append site
+    0xF8B54 — the inserted copy reuses the append lr, so the append-lr
+    count goes 1 -> 2). The temp holds an SSO string (<= 15 chars),
+    so there is no heap buffer to reset or free."""
+    if EDIT6_MARKER in s:
+        return s
+    assert s.count('ctx->lr = 0x000F8B54; func_001533D0(ctx);') == 1, \
+        "edit6 guard: F8B54 append count != 1"
+    anchor = ('loc_000F8B7C:\n'
+              '        { int64_t a = (int32_t)ctx->gpr[23]; int64_t b = (int64_t)0; uint32_t cr_val = ((a < b) ? 8 : (a > b) ? 4 : 2) | ((ctx->xer >> 31) & 1u); ctx->cr = (ctx->cr & ~(0xFu << 28)) | (cr_val << 28); }')
+    assert s.count(anchor) == 1, f"edit6 anchor count={s.count(anchor)}"
+    snippet = '''        /* === CHEATS PATCH: append the "Cheats" item (pause Settings) === */
+        ctx->gpr[20] = ctx->gpr[1] + (int64_t)(0x86C);
+        ctx->gpr[28] = ppc_rldicl(ctx->gpr[20], 0, 32);
+        ctx->gpr[4] = (int64_t)(uint32_t)(0x21010000u);
+        ctx->gpr[3] = ctx->gpr[28] | ctx->gpr[28];
+        ctx->lr = 0x000F8B2C; func_000D9218(ctx); DRAIN_TRAMPOLINE(ctx);
+        /* nop */;
+        ctx->gpr[3] = ctx->gpr[25] | ctx->gpr[25];
+        ctx->gpr[4] = ctx->gpr[28] | ctx->gpr[28];
+        ctx->gpr[5] = (int64_t)(int32_t)(31);
+        ctx->gpr[6] = (int64_t)(int32_t)(0);
+        ctx->gpr[7] = (int64_t)(int32_t)(0);
+        ctx->gpr[8] = (int64_t)(int32_t)(0);
+        ctx->gpr[9] = (int64_t)(int32_t)(0);
+        ctx->gpr[10] = (int64_t)(int32_t)(0);
+        ctx->lr = 0x000F8B54; func_001533D0(ctx); DRAIN_TRAMPOLINE(ctx);
+        /* nop */;
+'''
+    label, compare = anchor.split('\n', 1)
+    s = s.replace(anchor, label + '\n' + snippet + compare)
+    assert s.count('ctx->lr = 0x000F8B54; func_001533D0(ctx);') == 2, \
+        "edit6 post-count != 2"
+    return s
+
+if "CHEATS PATCH" in src and EDIT6_MARKER in src:
     print("already patched:", PATH)
+    sys.exit(0)
+
+if "CHEATS PATCH" in src:
+    # Stage-2 edits already applied (e.g. the tools lift): Edit 6 only.
+    open(PATH, "w").write(apply_edit6(src))
+    print("stage-2 lift patch: edit 6 applied to", PATH)
     sys.exit(0)
 
 def rep(old, new, tag):
@@ -202,6 +260,9 @@ rep('''        ctx->lr = 0x000F8544; func_001533D0(ctx); DRAIN_TRAMPOLINE(ctx);
         vm_write8(ctx->gpr[1] + 0x5D0, ctx->gpr[19]);
         ctx->gpr[21] = vm_read32(ctx->gpr[1] + 0x76C);''',
     "edit4-options-item")
+
+# --- Edit 6: the "Cheats" item in the pause Settings builder ----------
+src = apply_edit6(src)
 
 open(PATH, "w").write(src)
 print("stage-2 lift patch applied to", PATH)
