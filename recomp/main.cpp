@@ -171,6 +171,8 @@ static void comet_crash_camera_tick(void)
     uint32_t follow_addr = kGameBase + 0x00551F1C;
     uint32_t ship_addr   = kGameBase + 0x00552070;
     uint32_t state_addr  = kGameBase + 0x005520C0;
+    uint32_t proj_addr   = kGameBase + 0x0054DFA0;
+    uint32_t mview_addr  = kGameBase + 0x0054DFE0;
 
     if (s_lock_zoom > 0) {
         uint32_t zero = 0;
@@ -194,22 +196,37 @@ static void comet_crash_camera_tick(void)
         memcpy(&ship[i], &sw, 4);
     }
 
+    float mv[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        uint32_t mw = __builtin_bswap32(*(uint32_t*)(vm_base + mview_addr + i * 4));
+        memcpy(&mv[i], &mw, 4);
+    }
+
+    float proj[16] = {0};
+    for (int i = 0; i < 16; i++) {
+        uint32_t pw = __builtin_bswap32(*(uint32_t*)(vm_base + proj_addr + i * 4));
+        memcpy(&proj[i], &pw, 4);
+    }
+
     static float s_last_z = -999.0f;
     static uint8_t s_last_f = 255;
     static uint32_t s_last_st = 0xFFFFFFFF;
     static float s_last_sx = -999.0f, s_last_sy = -999.0f;
+    static unsigned s_last_fc = 0;
     if (s_cam_diag && (fabsf(cur_z - s_last_z) > 0.001f || follow != s_last_f || raw_st != s_last_st ||
-                       fabsf(ship[0] - s_last_sx) > 0.1f || fabsf(ship[1] - s_last_sy) > 0.1f || (fc > 0 && fc % 120 == 0))) {
+                       fabsf(ship[0] - s_last_sx) > 0.1f || fabsf(ship[1] - s_last_sy) > 0.1f || (fc > 0 && fc - s_last_fc >= 120))) {
         uint8_t gw = *(uint8_t*)(vm_base + kGameBase + 0x37E1);
         uint8_t gh = *(uint8_t*)(vm_base + kGameBase + 0x37E2);
-        printf("[CC_CAM] flip %u: state=%u follow=%u (force_ov=%d) zoom=%.4f (lock_z=%d) ship=(%.2f, %.2f, %.2f) grid=%ux%u\n",
-               fc, raw_st, follow, s_force_overview, cur_z, s_lock_zoom, ship[0], ship[1], ship[2], gw, gh);
+        printf("[CC_CAM] flip %u: state=%u follow=%u zoom=%.4f ship=(%.2f, %.2f, %.2f) grid=%ux%u cam_trans=(%.2f, %.2f, %.2f) proj=(%.3f, %.3f)\n",
+               fc, raw_st, follow, cur_z, ship[0], ship[1], ship[2], gw, gh,
+               mv[12], mv[13], mv[14], proj[0], proj[5]);
         fflush(stdout);
         s_last_z = cur_z;
         s_last_f = follow;
         s_last_st = raw_st;
         s_last_sx = ship[0];
         s_last_sy = ship[1];
+        s_last_fc = fc;
     }
 }
 
