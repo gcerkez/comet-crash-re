@@ -359,7 +359,9 @@ static void comet_cheats_tick(void)
         fprintf(stderr, "[cheats] requirement table restored\n");
     }
     if (s_cheats[1] && in_match) {
-        for (int p = 0; p < 1; p++) {
+        /* Local player = stat-array index 1; index 0 is the opponent
+           (verified live in Battle + Campaign, 2026-11-07). */
+        for (int p = 1; p < 2; p++) {
             uint32_t a = kBase + 0x302 + p * 0x80;
             comet_wr16(a, (uint16_t)(comet_rd16(a) | 0x0030));
         }
@@ -378,7 +380,7 @@ static void comet_cheats_tick(void)
         }
     }
     if (s_cheats[2]) {
-        for (int p = 0; p < 1; p++)
+        for (int p = 1; p < 2; p++)
             for (int k = 0; k < 8; k++)
                 comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 999);
     }
