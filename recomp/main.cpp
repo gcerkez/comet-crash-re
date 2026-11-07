@@ -382,7 +382,7 @@ static void comet_cheats_tick(void)
     if (s_cheats[2]) {
         for (int p = 1; p < 2; p++)
             for (int k = 0; k < 8; k++)
-                comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 999);
+                comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 60);
     }
 }
 
