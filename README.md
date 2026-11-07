@@ -32,6 +32,7 @@ game binary itself.**
 | Cleaned reconstruction | [reconstruction/](reconstruction/) | Renamed, re-typed, commented code for subsystems we actually understand. Empty for now; grows from the notes. |
 | Native host | [native/](native/) | The C++17 + SDL3 app the reconstruction grows into. Milestone 1: window + frame loop + unified keyboard/mouse/gamepad input (the native stand-in for the original's `sys_io` pad sampling). |
 | Port notes | [notes/NATIVE-PORT-001.md](notes/NATIVE-PORT-001.md) | The module breakdown of the original, the decoded import map (20 libraries / 195 functions), the PS3→native service map, and the port roadmap. |
+| Static recompilation | [recomp/](recomp/) | Full, playable PC static recompilation (`CometCrashRecomp`) targeting Linux x64/Vulkan via ps3recomp with native SPU multi-threading and corrected 720p scaling. |
 | Tooling | [scripts/](scripts/) | The exact Ghidra export script used to produce the corpus, so every artifact here is reproducible. |
 
 ## Reconstruction progress

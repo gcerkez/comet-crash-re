@@ -1,11 +1,39 @@
-# Binary and engine state stay on the analysis machine (see notes/PROVENANCE.md)
+# Binary, game data, and engine state stay off git (see notes/PROVENANCE.md)
 *.ELF
+*.elf
+*.SELF
+*.self
 *.BIN
+*.bin
+*.SPRX
+*.sprx
+*.PRX
+*.prx
+*.pkg
+*.PKG
 *.rap
+*.RAP
+*.edat
+*.EDAT
+*.sdat
+*.SDAT
+*.pak
+*.PAK
+PARAM.SFO
+
+# Analysis & hand-port build artifacts
 ghidra/
 *.snapshot
 analysis/*.log
-tools-dl/
 analysis/*.status
-analysis/*.log
+tools-dl/
 native/build/
+
+# Static recompilation generated guest code, VFS, saves, and build outputs
+recomp/build/
+recomp/out/
+recomp/recompiled/
+recomp/spu/
+recomp/vfs/
+recomp/gamedata/
+recomp/savedata/

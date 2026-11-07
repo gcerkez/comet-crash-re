@@ -1,0 +1,55 @@
+# CometCrashRecomp -- Reference configuration metadata (NPUB30061)
+#
+# Note: Build and lift paths are passed directly to `recomp/scripts/setup.py`
+# and CMake; this file documents the target title's module and memory profile.
+
+[title]
+name = "Comet Crash"
+title_id = "NPUB30061"
+content_id = "UP2009-NPUB30061_00-PELFASTCC0000020"
+eboot_sha256 = "a18d8e4a4a2620fd58f7c09e9639f3de91b3197cab3877c554e369dee430a00c"
+eboot_size = 2817600
+entry_opd = "0x001F2B38"
+
+[modules]
+cellSysutil            = "hle"
+cellSysmodule          = "hle"
+sysPrxForUser          = "hle"
+sys_fs                 = "hle"
+sys_io                 = "hle"
+sys_net                = "hle"
+cellAudio              = "hle"
+cellGcmSys             = "hle"
+cellResc               = "hle"
+cellSpurs              = "hle"
+cellPngDec             = "hle"
+cellGame               = "hle"
+cellNetCtl             = "hle"
+cellRtc                = "hle"
+cellRec                = "hle"
+cellVideoExportUtility = "hle"
+cellVideoUpload        = "hle"
+sceNp                  = "hle"
+sceNpTrophy            = "hle"
+sceNpCommerce2         = "hle"
+
+[memory]
+main_ram_mb = 256
+vram_mb = 256
+thread_stack_kb = 1024
+
+[threading]
+max_ppu_threads = 64
+max_spu_threads = 6
+use_host_threads = true
+
+[graphics]
+backend = "vulkan"
+width = 1280
+height = 720
+vsync = "on"
+
+[audio]
+backend = "sdl"
+sample_rate = 48000
+buffer_size = 512
