@@ -73,3 +73,23 @@ Side finding (not the cause, fix when next in the file):
 cellAudioPortOpen drops the guest's CellAudioPortParam.level
 (cellAudio.c:837-869); today the mixer's `level<=0 → 1.0` coercion
 masks it.
+
+## Addendum (same day): firmware route scrapped — native codec instead
+
+Jerry's direction: no PlayStation firmware at all. His end goal
+for this project is a fully native, self-contained, freely
+distributable AppImage, and a Sony firmware file is neither native
+nor distributable. The PS3_DEV_FLASH launcher wiring from the fix
+above was removed the same day (the downloaded PUP remains in
+~/Downloads for his RPCS3 use, untouched by the game).
+
+Replacement plan: implement the codec's function on the host, at
+the exact seam the SPU runtime already stubs (the PIC call sites
+into LS 0x1A900, runtime/spu/spu_channels.c ~2925). When
+MultiStream calls the codec, the host decodes the MP3 with
+minimp3 (public domain, single header — already the decoder the
+native hand port uses for the same assets) and returns PCM in the
+codec's place. No Sony code, no firmware file, nothing that
+changes the distributable status of the bundle. First step is a
+spec of the PIC ABI from the lifted MultiStream image (entry
+offsets, arguments, stream state, buffer formats).
