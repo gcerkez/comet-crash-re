@@ -24,6 +24,7 @@ export PAD_DEBUG_LOG="${PAD_DEBUG_LOG:-1}"
 export CC_CAM_DIAG="${CC_CAM_DIAG:-1}"
 export CC_LOCK_ZOOM="${CC_LOCK_ZOOM:-0}"
 export CC_FORCE_OVERVIEW="${CC_FORCE_OVERVIEW:-0}"
+export CC_FORCE_FOLLOW="${CC_FORCE_FOLLOW:-1}"
 export PS3RECOMP_VP_DIAG="${PS3RECOMP_VP_DIAG:-1}"
 
 echo "[*] Launching Comet Crash Recomp..."

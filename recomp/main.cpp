@@ -166,13 +166,20 @@ static void comet_crash_camera_tick(void)
         const char* e = getenv("CC_FORCE_OVERVIEW");
         s_force_overview = e ? atoi(e) : 0;
     }
+    static int s_force_follow = -1;
+    if (s_force_follow < 0) {
+        const char* e = getenv("CC_FORCE_FOLLOW");
+        s_force_follow = e ? atoi(e) : 1;
+    }
 
-    uint32_t zoom_addr   = 0x005520D8;
-    uint32_t follow_addr = 0x00551F1C;
-    uint32_t ship_addr   = 0x00552070;
-    uint32_t state_addr  = 0x005520C0;
+    uint32_t zoom_addr   = kGameBase + 0x005520D8;
+    uint32_t follow_addr = kGameBase + 0x00551F1C;
+    uint32_t ship_addr   = kGameBase + 0x00552070;
+    uint32_t state_addr  = kGameBase + 0x005520C0;
     uint32_t proj_addr   = kGameBase + 0x0054DFA0;
     uint32_t mview_addr  = kGameBase + 0x0054DFE0;
+
+    uint32_t raw_st = __builtin_bswap32(*(uint32_t*)(vm_base + state_addr));
 
     if (s_lock_zoom > 0) {
         uint32_t zero = 0;
@@ -180,6 +187,8 @@ static void comet_crash_camera_tick(void)
     }
     if (s_force_overview > 0) {
         *(uint8_t*)(vm_base + follow_addr) = 0;
+    } else if (s_force_follow > 0 && (raw_st == 12 || raw_st == 13)) {
+        *(uint8_t*)(vm_base + follow_addr) = 1;
     }
 
     unsigned fc = cellGcm_flip_request_count();
@@ -188,7 +197,6 @@ static void comet_crash_camera_tick(void)
     memcpy(&cur_z, &raw_z, 4);
 
     uint8_t follow = *(uint8_t*)(vm_base + follow_addr);
-    uint32_t raw_st = __builtin_bswap32(*(uint32_t*)(vm_base + state_addr));
 
     float ship[4] = {0};
     for (int i = 0; i < 4; i++) {
@@ -211,21 +219,21 @@ static void comet_crash_camera_tick(void)
     static float s_last_z = -999.0f;
     static uint8_t s_last_f = 255;
     static uint32_t s_last_st = 0xFFFFFFFF;
-    static float s_last_sx = -999.0f, s_last_sy = -999.0f;
+    static float s_last_sx = -999.0f, s_last_sz = -999.0f;
     static unsigned s_last_fc = 0;
     if (s_cam_diag && (fabsf(cur_z - s_last_z) > 0.001f || follow != s_last_f || raw_st != s_last_st ||
-                       fabsf(ship[0] - s_last_sx) > 0.1f || fabsf(ship[1] - s_last_sy) > 0.1f || (fc > 0 && fc - s_last_fc >= 120))) {
+                       fabsf(ship[0] - s_last_sx) > 0.1f || fabsf(ship[2] - s_last_sz) > 0.1f || (fc > 0 && fc - s_last_fc >= 120))) {
         uint8_t gw = *(uint8_t*)(vm_base + kGameBase + 0x37E1);
         uint8_t gh = *(uint8_t*)(vm_base + kGameBase + 0x37E2);
-        printf("[CC_CAM] flip %u: state=%u follow=%u zoom=%.4f ship=(%.2f, %.2f, %.2f) grid=%ux%u cam_trans=(col3: %.2f, %.2f, %.2f; row3: %.2f, %.2f, %.2f) proj=(%.3f, %.3f)\n",
-               fc, raw_st, follow, cur_z, ship[0], ship[1], ship[2], gw, gh,
-               mv[12], mv[13], mv[14], mv[3], mv[7], mv[11], proj[0], proj[5]);
+        printf("[CC_CAM] flip %u: state=%u follow=%u (force_fol=%d) zoom=%.4f ship=(X=%.2f, Y=%.2f, Z=%.2f) grid=%ux%u cam_trans=(col3: %.2f, %.2f, %.2f) proj=(%.3f, %.3f)\n",
+               fc, raw_st, follow, s_force_follow, cur_z, ship[0], ship[1], ship[2], gw, gh,
+               mv[12], mv[13], mv[14], proj[0], proj[5]);
         fflush(stdout);
         s_last_z = cur_z;
         s_last_f = follow;
         s_last_st = raw_st;
         s_last_sx = ship[0];
-        s_last_sy = ship[1];
+        s_last_sz = ship[2];
         s_last_fc = fc;
     }
 }
