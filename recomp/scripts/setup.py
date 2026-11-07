@@ -30,7 +30,7 @@ EXPECTED_SIZE = 2817600
 SPU_ELFS = [
     {
         "name": "spu_0000_at_00175D00",
-        "offset": 0x175E00,
+        "offset": 0x175D00,
         "size": 68480,
         "entry_sym": "spu_0000_at_00175D00_spu_func_000000E0",
         "fp_full": "0x766D7BD517152191ULL",
@@ -39,7 +39,7 @@ SPU_ELFS = [
     },
     {
         "name": "spu_0001_at_001C0B80",
-        "offset": 0x1C0C80,
+        "offset": 0x1C0B80,
         "size": 23040,
         "entry_sym": "spu_0001_at_001C0B80_spu_func_00003050",
         "fp_full": "0x57B37E2E758AFC4CULL",
