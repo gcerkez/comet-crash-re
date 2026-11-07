@@ -167,10 +167,10 @@ static void comet_crash_camera_tick(void)
         s_force_overview = e ? atoi(e) : 0;
     }
 
-    uint32_t zoom_addr   = kGameBase + 0x005520D8;
-    uint32_t follow_addr = kGameBase + 0x00551F1C;
-    uint32_t ship_addr   = kGameBase + 0x00552070;
-    uint32_t state_addr  = kGameBase + 0x005520C0;
+    uint32_t zoom_addr   = 0x005520D8;
+    uint32_t follow_addr = 0x00551F1C;
+    uint32_t ship_addr   = 0x00552070;
+    uint32_t state_addr  = 0x005520C0;
     uint32_t proj_addr   = kGameBase + 0x0054DFA0;
     uint32_t mview_addr  = kGameBase + 0x0054DFE0;
 
@@ -217,9 +217,9 @@ static void comet_crash_camera_tick(void)
                        fabsf(ship[0] - s_last_sx) > 0.1f || fabsf(ship[1] - s_last_sy) > 0.1f || (fc > 0 && fc - s_last_fc >= 120))) {
         uint8_t gw = *(uint8_t*)(vm_base + kGameBase + 0x37E1);
         uint8_t gh = *(uint8_t*)(vm_base + kGameBase + 0x37E2);
-        printf("[CC_CAM] flip %u: state=%u follow=%u zoom=%.4f ship=(%.2f, %.2f, %.2f) grid=%ux%u cam_trans=(%.2f, %.2f, %.2f) proj=(%.3f, %.3f)\n",
+        printf("[CC_CAM] flip %u: state=%u follow=%u zoom=%.4f ship=(%.2f, %.2f, %.2f) grid=%ux%u cam_trans=(col3: %.2f, %.2f, %.2f; row3: %.2f, %.2f, %.2f) proj=(%.3f, %.3f)\n",
                fc, raw_st, follow, cur_z, ship[0], ship[1], ship[2], gw, gh,
-               mv[12], mv[13], mv[14], proj[0], proj[5]);
+               mv[12], mv[13], mv[14], mv[3], mv[7], mv[11], proj[0], proj[5]);
         fflush(stdout);
         s_last_z = cur_z;
         s_last_f = follow;
