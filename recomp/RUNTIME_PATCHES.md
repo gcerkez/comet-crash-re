@@ -324,3 +324,19 @@ to [-1, 1], squaring stacked peaks (the leading suspect for sounds
 AUDIO_MIX_NORM=1, a block that would clip is scaled uniformly to
 peak 1.0 instead; sub-full-scale blocks are bit-identical, so solo
 sounds never change. Default off pending a heavy-load verdict.
+
+## 23. Fragment-program walk memoization (fork dc9878b2)
+
+eng_pipeline_get re-walked the fragment program five times per
+draw (texture units, gamma units, expand units, structural hash,
+inline constants) before its pipeline cache lookup -- the FIFO
+thread's top cost in sprite-heavy scenes (live profile: ~380%
+CPU, GPU 5-38%). The five results are pure functions of the
+program bytes (+ the gamma/expand input masks) and are now
+memoized on an FNV content fingerprint: one byte pass replaces
+five decode walks. Failure semantics preserved (malformed
+program and collect failure still return 0; >256-constant
+programs take the direct path). Driven-session counters: 72%
+of 327,680 lookups served from the memo; rendering verified in
+a live match; frame-rate A/B neutral under identical conditions.
+Full investigation: notes 048.
