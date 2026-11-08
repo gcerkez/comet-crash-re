@@ -144,3 +144,24 @@ seconds), with span-capped dumps seconds apart across the death —
 the earlier hunts failed on bracketing, not on analysis. When the
 field exists, the Ship row joins the submenu as a fifth toggle
 (opcodes 57/67 remain free; label slots at 0x210101A0+ are clear).
+
+## Ship hunt 6 (2026-11-08, later): driven matches don't hurt the ship
+
+One more controlled attempt (`cc_drive_ship6.sh`): a 45 s flight
+parked the ship deep inside the enemy base cluster in Kreios L1
+(camera-follow framed it beside the enemy turret wall), then ~5
+minutes of exposure with dumps every ~35 s (Q0–Q8). Screenshots
+Q0 (00:38) and Q9 (05:34): the ship is pixel-identical, intact,
+never fired on — while the AI actively sent 17+ units and leaked
+the idle player base 25 → 13. So at these parking spots the ship
+takes no damage at all in a driven match (targeting rules — the
+neighbouring weapons are ground-only families — or the exact cell
+it settles on). No death occurred, so there is nothing to diff;
+the dumps were discarded.
+
+Revised next step: the field hunt needs a session where the ship
+provably takes damage — most reliably Jerry's own real play (he
+reported ship losses on 2026-11-08): read-only span-capped dumps
+from his live process across a death he flags, or a driven setup
+that puts the ship in an anti-air weapon's arc once a level's
+structure kinds are mapped. Parked until then.
