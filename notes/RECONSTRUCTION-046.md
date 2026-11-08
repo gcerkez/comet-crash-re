@@ -78,3 +78,15 @@ leftover from an earlier automated session. It sits in the boot
 path and is unrelated to this defect. Removing it (and folding
 the removal into the lift patch scripts so a fresh lift does not
 carry it) is queued as its own change.
+
+## Addendum (2026-11-08): the hook is out
+
+Verified before removal: a fresh lift produced by setup.py does
+not contain the hook, and neither does the lifter — it existed
+only in this workspace's generated lift file (and the binary
+built from it). Removed with patch_remove_state0_hook.py
+(assert-anchored; the genuine body of func_000E41CC follows the
+hook block and is untouched), rebuilt, and boot-verified. No
+repo patch script needs to carry the removal: a fresh lift never
+had it. The working lift's other patches (cheats Edits 1–4 + 6,
+redraw, unlink) were re-grepped after the edit and are intact.
