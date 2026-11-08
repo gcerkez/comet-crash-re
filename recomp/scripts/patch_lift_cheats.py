@@ -27,9 +27,15 @@ notes/RECONSTRUCTION-041 and cc-cheat-investigation/stage2_liftmap.md):
   cleanup (each temp is still reset after use, mirroring the game's
   own idiom).
 - Toggle rows use opcodes 14/30/37/47 -> loc_cheats_flip0..3, which
-  call the glue's comet_cheats_flip(i) and return 1 WITHOUT rebuilding
-  (push semantics untraced; labels refresh when the submenu reopens,
-  exactly how the Video Record flow re-derives state on open).
+  call the glue's comet_cheats_flip(i), unlink-and-close the current
+  submenu via FUN_001339E0 (menu anchor = game object + 0x53654C,
+  guest 0x844B4C; its ->next is the open submenu), then re-run the
+  builder (goto loc_cheats_build) so the row label is recomposed
+  from the new state in place. The unlink matters: the builder
+  INSERTS the fresh submenu at the anchor without removing the old
+  one, so a bare rebuild stacks stale copies that Circle then has
+  to wade through (driven-verified 2026-11-07; see
+  cc-cheat-investigation/toggle_redraw.md and notes 041).
 
 Assert-anchored and idempotent per edit: a file with the stage-2
 edits but without Edit 6 gets only Edit 6; a fully patched file
@@ -208,20 +214,32 @@ loc_cheats_title:
         goto loc_000F6BC0;
 loc_cheats_flip0:
         comet_cheats_flip(0);
-        ctx->gpr[3] = (int64_t)(int32_t)(1);
-        goto loc_000F6BC0;
+        /* CHEATS REDRAW + UNLINK: close the current submenu (the
+           menu anchor's head, guest 0x844B4C) via the game's own
+           unlink-and-close helper, then rebuild so the label
+           reflects the new state. Without the unlink each rebuild
+           stacks a stale submenu copy above the old one. */
+        ctx->gpr[3] = (int64_t)(uint32_t)(0x844B4Cu);
+        ctx->lr = 0x000F6BB0; func_001339E0(ctx); DRAIN_TRAMPOLINE(ctx);
+        goto loc_cheats_build;
 loc_cheats_flip1:
         comet_cheats_flip(1);
-        ctx->gpr[3] = (int64_t)(int32_t)(1);
-        goto loc_000F6BC0;
+        /* CHEATS REDRAW + UNLINK: see flip0. */
+        ctx->gpr[3] = (int64_t)(uint32_t)(0x844B4Cu);
+        ctx->lr = 0x000F6BB0; func_001339E0(ctx); DRAIN_TRAMPOLINE(ctx);
+        goto loc_cheats_build;
 loc_cheats_flip2:
         comet_cheats_flip(2);
-        ctx->gpr[3] = (int64_t)(int32_t)(1);
-        goto loc_000F6BC0;
+        /* CHEATS REDRAW + UNLINK: see flip0. */
+        ctx->gpr[3] = (int64_t)(uint32_t)(0x844B4Cu);
+        ctx->lr = 0x000F6BB0; func_001339E0(ctx); DRAIN_TRAMPOLINE(ctx);
+        goto loc_cheats_build;
 loc_cheats_flip3:
         comet_cheats_flip(3);
-        ctx->gpr[3] = (int64_t)(int32_t)(1);
-        goto loc_000F6BC0;
+        /* CHEATS REDRAW + UNLINK: see flip0. */
+        ctx->gpr[3] = (int64_t)(uint32_t)(0x844B4Cu);
+        ctx->lr = 0x000F6BB0; func_001339E0(ctx); DRAIN_TRAMPOLINE(ctx);
+        goto loc_cheats_build;
 '''
 
 rep('''loc_000F6BBC:

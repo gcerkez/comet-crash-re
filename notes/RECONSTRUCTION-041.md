@@ -247,3 +247,38 @@ records at 500 and stockpile_amount=25 pinned all unit stockpiles
 at 25; a live edit to thorium_amount=99999 re-pinned at the 1000
 clamp within seconds. Jerry's own ~/.cc_cheats was restored
 byte-identical after the test.
+
+## Addendum (2026-11-07, late): toggle labels refresh in place
+
+Jerry: "the toggles must update visually IN PLACE — currently a
+flip only shows its actual state after leaving the menu and going
+back." Research (cc-cheat-investigation/toggle_redraw.md) showed
+row text is baked into the item at build time and the game's own
+refresh idiom for a state row (the pre-game Timer) is a builder
+re-run, so the flip blocks were redirected to the submenu builder.
+
+Driven testing then exposed what the research could not: the
+builder INSERTS the fresh menu at the menu-list anchor (game
+object + 0x53654C, guest 0x844B4C -- traced live: the anchor is
+constant and anchor->next is exactly the open submenu) without
+removing the old one. After three flips, one Circle landed on a
+stale copy showing pre-flip labels, with three more copies beneath
+it. The cursor also restarts on the first row of the rebuilt menu.
+
+Final form: each flip block calls the game's own unlink-and-close
+helper FUN_001339E0 with the anchor address first -- it removes
+anchor->next and runs the node's close virtual, exactly what a
+Circle press does -- then re-runs the builder. FUN_001339E0 leaves
+gpr[26] (the builder's anchor source) and gpr[2] intact, and the
+builder re-derives everything else.
+
+Driven verification, both entry points, same session build:
+Options -> Cheats: Thorium flips On->Off->On in place; Buildables
+flips in place; one Circle lands on Options with Cheats still
+selected. Pause -> Settings -> Cheats (walked one step at a time;
+count-8 pad holds overshoot in pause -- the separate pause-pace
+defect): Health flips Off->On in place over the live match; one
+Circle returns to Settings with Cheats selected. The only
+remaining cosmetic difference from a native toggle: after a flip
+the highlight restarts on the first row, because the submenu is
+rebuilt; the label and state are always current.
