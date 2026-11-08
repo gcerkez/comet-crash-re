@@ -361,3 +361,45 @@ cycling/flips from Options; a 2P Battle (Player 2 Thorium pinned
 at 1000 while Player 1 stayed 550; Player 1's health pin restored
 a poked life while Player 2's stayed down); a Campaign regression
 run (human slot 1 pinned as before, AI untouched).
+
+## #26 — Cheats stage 4: the Ship toggle, plus the stockpile aggregate fix
+
+Two changes, both in the host cheats module / lift patch family
+(#14/#15/#20/#24 lineage):
+
+**Ship (invulnerable player ship).** The ship is a type-1 entity in
+the game's double-buffered 256-byte entity banks (bank bases are the
+u32s at obj+0x180 / obj+0x198; the per-player ship record index is
+the u16 at obj+0x36C8 + 2*slot; bank A = 0x10800200, bank B =
+0x13500100 in observed sessions). Health is the float at record
++0x50, max the float at +0x64 (1000.0, stamped at creation by
+FUN_0011c4f8 from the constant at ELF VA 0x1F5A90). All damage,
+healing and death run inside SPU job 00188300: deltas apply as
+health = min(max, health + delta) with no lower clamp; the death
+path triggers on health <= 0 and writes health := 1.0f before the
+record becomes a type-63 tombstone or respawns at 1000.0. Verified
+against all 61 hunt-7 RAM dumps and confirmed live: an external
+poke of 500.0 stuck and then rose at the base-repair rate
+(~+122/s) in both banks. The glue tick, per enabled player, pins
+record +0x50 := record +0x64 in both banks (type byte +0x0F == 1
+checked first; registry index 0 falls back to a scan for the first
+type-1 record so solo play always resolves). Menu: a fifth toggle
+row "Ship: On/Off" under Health, opcode 57, control-file key
+ship= / pN_ship=, env seed CC_CHEAT_SHIP / CC_CHEAT_P<N>_SHIP.
+Which registry slot a second human's ship takes in Battle is
+unobserved; the mapping follows the stat-slot order.
+
+**Stockpile aggregate fix.** The cheat pinned the eight per-type
+stockpiles (stat block +0x64) but not their aggregate twin, the u16
+at block +0x5E, whose invariant is +0x5E == sum of the eight. Every
+cheat-fed send decremented the aggregate from 0, so it underflowed
+(Jerry's sessions reached -572): the HUD sword counter
+(FUN_00146b98: (short)+0x5A + (ushort)+0x5E, clamped to a literal
+1000) saturated at 1000, and the production gate — reading the
+counter unsigned against the 1000 cap — stayed shut after the
+cheat was disabled, soft-locking building. The tick now also pins
+block +0x5E := 8 * stockpile_amount in the same branch (2-byte
+store only; +0x5C/+0x5D are flag bytes). With the cheat on, the
+aggregate always equals the pinned stockpiles; on disable, the
+last tick leaves it equal to the real total and the game's own
+bookkeeping tracks from there.

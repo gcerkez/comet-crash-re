@@ -165,3 +165,75 @@ reported ship losses on 2026-11-08): read-only span-capped dumps
 from his live process across a death he flags, or a driven setup
 that puts the ship in an anti-air weapon's arc once a level's
 structure kinds are mapped. Parked until then.
+
+## Addendum (2026-11-08 evening): the ship cheat, and the stockpile aggregate
+
+### Ship health — solved from the corpus, verified live
+
+The ship is a type-1 entity in the double-buffered 256-byte entity
+banks. Bank bases are the u32s at obj+0x180 (A; 0x10800200 in both
+observed sessions) and obj+0x198 (B; 0x13500100). The per-player
+ship record index is the u16 at obj+0x36C8 + 2*slot (slot 1 = the
+local human; index 271 in Jerry's sessions, 89 in driven ones —
+per-match allocation, so resolve it every tick). Record layout:
+type byte +0x0F == 1, position float4 at +0x00 (X +0, Z +8 — sim
+OUTPUT: position pokes snap back; health pokes stick), **health =
+float at +0x50, max = float at +0x64 (1000.0)**, stamped at creation
+by FUN_0011c4f8 from the constant at ELF VA 0x1F5A90 and inserted
+into both banks by FUN_000dd358. All damage/heal/death runs inside
+SPU job 00188300: deltas apply as health = min(max, health + delta)
+with no lower clamp; on health <= 0 the death path writes
+health := 1.0f, then the record becomes a type-63 tombstone
+(+0x50 = +0x64 = 100.0, position (-10, 0)) or respawns at 1000.0.
+Healing is a positive fractional delta near the player's own base
+(~+122/s at full rate). The respawn countdown lives only in the
+job's local store.
+
+Evidence: the float at bankA + idx*256 + 0x50 traces all 61 hunt-7
+dumps against Jerry's flagged events (1000 -> 550 on the damage
+callout; dump 18 catches the death write to exactly 1.0f; match 2
+shows 850, fractional 846.663, heal refills, death/respawn pairs).
+Live confirmation in Jerry's session: an announced poke to 500.0
+stuck and rose at the repair rate in both banks. The earlier
+candidate 0x43C318 is a downstream statistics record — excluded by
+Jerry's pin-and-get-shot test (four deaths with the pin live, zero
+writes to the field).
+
+Cheat (stage 4): the glue pins record +0x50 := record +0x64 in
+both banks per enabled player (type byte checked first; index 0
+falls back to a scan for the first type-1 record). Menu row
+"Ship: On/Off" (opcode 57) under Health; file key ship= / pN_ship=;
+env CC_CHEAT_SHIP / CC_CHEAT_P<N>_SHIP. Driven verification on the
+stage-4 build: poking 500.0 restored to exactly 1000.0 in both
+banks within <=100 ms and held; the control run (cheat off) stayed
+at 500 and crept only at the repair rate. A driven end-to-end test
+under live enemy fire was not achieved — parked ships draw no fire
+(the hunt-6 phenomenon); per-frame re-pinning makes a one-frame
+lethal dip impossible in practice (a frame's laser damage is tens
+of points, not >1000). Unverified: which registry slot a second
+human's ship takes in Battle (the mapping follows stat-slot
+order); whether shield upgrades modify +0x64 (pinning to the
+record's own max covers it either way).
+
+### Stockpile aggregate desync — root cause and fix
+
+Stat block +0x5E (u16) is the aggregate stockpile total, invariant
++0x5E == sum of the eight per-type stockpiles at block +0x64. The
+stage-1 cheat pinned only the per-type array, so every cheat-fed
+send decremented the aggregate from 0: -112 in the hunt-7 Battle
+dumps (+0x5A field count +112), -572 in Jerry's live Campaign
+session (field 572, sum 0). Consequences: the HUD sword counter
+(FUN_00146b98: (short)+0x5A + (ushort)+0x5E, clamped to a literal
+1000) read 65536 -> 1000 and never moved; the production gate
+reads the counter unsigned against the 1000 cap, so after the
+cheat was disabled production stayed shut with empty stockpiles —
+Jerry's "cannot build anymore" report. (The send gate is separate
+and innocent; +0x7C = 1000 at block +0x7C has no reader in the
+corpus.) The AI slot in the same session satisfied the invariant
+untouched (929 == 929).
+
+Fix: the tick's stockpile branch also pins block +0x5E :=
+8 * stockpile_amount, 2-byte store only (+0x5C/+0x5D are flag
+bytes). Verified on the stage-4 build: slot 1 reads +0x5E == sum
+== 480 with the cheat on. Jerry's live session on the old build
+was repaired by hand (+0x5E -572 := 0, his true stockpile sum).

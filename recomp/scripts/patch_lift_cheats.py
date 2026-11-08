@@ -49,6 +49,13 @@ the top of the submenu cycles the glue's selected player; the four
 toggle rows beneath it show/flip that player's toggles via the
 unchanged comet_cheats_get/flip bridge. See
 notes/RECONSTRUCTION-049.
+
+Stage 4 (2026-11-08) likewise (marker "CHEATS STAGE4", applied by
+apply_stage4): a fifth toggle row, "Ship" (opcode 57, glue index
+4), beneath Health. The glue pins the selected player's ship
+health (entity record float at +0x50, max at +0x64, both entity
+banks) to its maximum every tick. Labels planted by the glue at
+0x210101A0/0x210101C0. See notes/RECONSTRUCTION-049 (ship addendum).
 """
 import sys
 
@@ -184,7 +191,77 @@ loc_000F6BBC:''',
         "t4-cycle-block")
     return s
 
-if "CHEATS PATCH" in src and EDIT6_MARKER in src and "CHEATS STAGE3" in src:
+STAGE4_MARKER = "CHEATS STAGE4"
+
+def apply_stage4(s):
+    """Stage 4: Ship toggle row in the Cheats submenu.
+
+    S41: opcode 57 intercept -> loc_cheats_flip4, next to stage 3's
+         opcode 49 intercept.
+    S42: the "Ship" row appended after the Health row in
+         loc_cheats_build (temp gpr[1]+0x6AC, continuing the rows'
+         descending temp series; labels planted by the glue at
+         0x210101A0 / 0x210101C0; glue index 4).
+    S43: loc_cheats_flip4 block (flip + unlink + rebuild, the flip
+         blocks' shape) after the stage-3 cycle block.
+    """
+    if STAGE4_MARKER in s:
+        return s
+
+    def rep(old, new, tag):
+        nonlocal s
+        assert s.count(old) == 1, f"stage4 anchor '{tag}' count={s.count(old)}"
+        s = s.replace(old, new)
+
+    rep('''        if ((uint32_t)ctx->gpr[4] == 49) goto loc_cheats_cycle;   /* Player row */''',
+        '''        if ((uint32_t)ctx->gpr[4] == 49) goto loc_cheats_cycle;   /* Player row */
+        /* === CHEATS STAGE4: Ship toggle (opcode 57) === */
+        if ((uint32_t)ctx->gpr[4] == 57) goto loc_cheats_flip4;   /* Ship toggle */''',
+        "s41-intercept")
+
+    health_tail = '''        vm_write32(ctx->gpr[1] + 0x6E0, ctx->gpr[28]);
+        vm_write32(ctx->gpr[1] + 0x6DC, ctx->gpr[31]);
+        vm_write8(ctx->gpr[1] + 0x6CC, ctx->gpr[31]);
+'''
+    ship_row = '''        /* === CHEATS STAGE4: Ship toggle row === */
+        ctx->gpr[11] = ctx->gpr[1] + (int64_t)(0x6AC);
+        ctx->gpr[29] = ppc_rldicl(ctx->gpr[11], 0, 32);
+        ctx->gpr[4] = (int64_t)(uint32_t)(comet_cheats_get(4) ? 0x210101A0u : 0x210101C0u);
+        ctx->gpr[3] = ctx->gpr[29] | ctx->gpr[29];
+        ctx->lr = 0x000FA184; func_000D9218(ctx); DRAIN_TRAMPOLINE(ctx);
+        /* nop */;
+        ctx->gpr[3] = ctx->gpr[30] | ctx->gpr[30];
+        ctx->gpr[4] = ctx->gpr[29] | ctx->gpr[29];
+        ctx->gpr[5] = (int64_t)(int32_t)(57);
+        ctx->gpr[6] = (int64_t)(int32_t)(0);
+        ctx->gpr[7] = (int64_t)(int32_t)(0);
+        ctx->gpr[8] = (int64_t)(int32_t)(0);
+        ctx->gpr[9] = (int64_t)(int32_t)(0);
+        ctx->gpr[10] = (int64_t)(int32_t)(0);
+        ctx->lr = 0x000FA1AC; func_001533D0(ctx); DRAIN_TRAMPOLINE(ctx);
+        /* nop */;
+        ctx->gpr[28] = (int64_t)(int32_t)(0xF);
+        ctx->gpr[31] = (int64_t)(int32_t)(0);
+        vm_write32(ctx->gpr[1] + 0x6C4, ctx->gpr[28]);
+        vm_write32(ctx->gpr[1] + 0x6C0, ctx->gpr[31]);
+        vm_write8(ctx->gpr[1] + 0x6B0, ctx->gpr[31]);
+'''
+    rep(health_tail, health_tail + ship_row, "s42-ship-row")
+
+    rep('''        goto loc_cheats_build;
+loc_000F6BBC:''',
+        '''        goto loc_cheats_build;
+loc_cheats_flip4:
+        /* === CHEATS STAGE4: Ship toggle flip + unlink + rebuild. === */
+        comet_cheats_flip(4);
+        ctx->gpr[3] = (int64_t)(uint32_t)(0x844B4Cu);
+        ctx->lr = 0x000F6BB0; func_001339E0(ctx); DRAIN_TRAMPOLINE(ctx);
+        goto loc_cheats_build;
+loc_000F6BBC:''',
+        "s43-flip4-block")
+    return s
+
+if "CHEATS PATCH" in src and EDIT6_MARKER in src and "CHEATS STAGE3" in src and "CHEATS STAGE4" in src:
     print("already patched:", PATH)
     sys.exit(0)
 
@@ -195,8 +272,9 @@ if "CHEATS PATCH" in src:
     if EDIT6_MARKER not in out:
         out = apply_edit6(out)
     out = apply_stage3(out)
+    out = apply_stage4(out)
     open(PATH, "w").write(out)
-    print("stage-2/3 lift patch: incremental edits applied to", PATH)
+    print("stage-2/3/4 lift patch: incremental edits applied to", PATH)
     sys.exit(0)
 
 def rep(old, new, tag):
@@ -381,6 +459,9 @@ src = apply_edit6(src)
 
 # --- Stage 3: Player selector row --------------------------------------
 src = apply_stage3(src)
+
+# --- Stage 4: Ship toggle row ------------------------------------------
+src = apply_stage4(src)
 
 open(PATH, "w").write(src)
 print("stage-2 lift patch applied to", PATH)
