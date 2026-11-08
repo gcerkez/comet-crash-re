@@ -340,3 +340,24 @@ programs take the direct path). Driven-session counters: 72%
 of 327,680 lookups served from the memo; rendering verified in
 a live match; frame-rate A/B neutral under identical conditions.
 Full investigation: notes 048.
+
+## 24. Cheats stage 3: per-player Battle cheats (repo)
+
+Cheat toggles are per player (notes 049). The Cheats submenu gains
+a "Player: N" selector row (opcode 49; glue bridge
+comet_cheats_get_player / comet_cheats_cycle_player); the four
+toggle rows beneath it show and flip the selected player's state.
+The glue keeps s_cheats[player][toggle] and the tick maps players
+to stat-array slots by the mode word (obj+0x55209C: 2 = Battle,
+Player N -> slot N-1; otherwise Player 1 -> slot 1, the Campaign
+human, and slot 0 is never pinned). Thorium pins the per-slot
+float channel (obj+0x348 + slot*0x80, the authoritative balance);
+the u32 shadow pair keeps following the slot-1 player. Control
+file gains p2_/p3_/p4_ prefixed lines; env gains
+CC_CHEAT_P<N>_<NAME>. Buildables' shared requirement table still
+neutralises globally when any player enables it (the per-seat
+tech-mask bits stay individual). Verified driven: submenu
+cycling/flips from Options; a 2P Battle (Player 2 Thorium pinned
+at 1000 while Player 1 stayed 550; Player 1's health pin restored
+a poked life while Player 2's stayed down); a Campaign regression
+run (human slot 1 pinned as before, AI untouched).
