@@ -258,6 +258,27 @@ static DWORD WINAPI vk_present_worker(LPVOID)
 /* the i16 at block +0x58 (human +0x3D8), its maximum the i16 at
 /* +0x3530+p*2 (human +0x3532).                                */
 /* ------------------------------------------------------------------ */
+/* Pin amounts are configurable (Jerry, 2026-11-07): the control file
+ * may carry "thorium_amount=N" / "stockpile_amount=N", and the env
+ * CC_CHEAT_THORIUM_AMOUNT / CC_CHEAT_STOCKPILE_AMOUNT seeds them at
+ * startup. Both clamp to the safe maxima determined in play: Thorium
+ * 1000 (larger values spill the HUD gauge across the screen) and
+ * stockpiles 60 per type (larger values flood the unit cap and break
+ * abilities such as thief conversion). */
+/* AMOUNTS PATCH (state) */
+static int s_thorium_amount   = 1000;
+static int s_stockpile_amount = 60;
+static int comet_cheat_amount(const char *s, int def, int max)
+{
+    if (!s || !s[0]) return def;
+    char *end = NULL;
+    long v = strtol(s, &end, 10);
+    if (end == s) return def;
+    if (v < 0) v = 0;
+    if (v > max) v = max;
+    return (int)v;
+}
+
 #define COMET_CHEAT_COUNT 4
 static int s_cheats[COMET_CHEAT_COUNT] = { 0, 0, 0, 0 };
 static const char *const s_cheat_names[COMET_CHEAT_COUNT] = { "thorium", "buildables", "stockpiles", "health" };
@@ -300,6 +321,14 @@ static void comet_cheats_poll(void)
         };
         for (int i = 0; i < COMET_CHEAT_COUNT; i++)
             if (envs[i] && envs[i][0] && strcmp(envs[i], "0") != 0) s_cheats[i] = 1;
+        /* AMOUNTS PATCH (env) */
+        s_thorium_amount   = comet_cheat_amount(getenv("CC_CHEAT_THORIUM_AMOUNT"),
+                                                s_thorium_amount, 1000);
+        s_stockpile_amount = comet_cheat_amount(getenv("CC_CHEAT_STOCKPILE_AMOUNT"),
+                                                s_stockpile_amount, 60);
+        if (getenv("CC_CHEAT_THORIUM_AMOUNT") || getenv("CC_CHEAT_STOCKPILE_AMOUNT"))
+            fprintf(stderr, "[cheats] env amounts: thorium=%d stockpiles=%d\n",
+                    s_thorium_amount, s_stockpile_amount);
         if (s_cheats[0] || s_cheats[1] || s_cheats[2] || s_cheats[3])
             fprintf(stderr, "[cheats] env: thorium=%d buildables=%d stockpiles=%d health=%d\n",
                     s_cheats[0], s_cheats[1], s_cheats[2], s_cheats[3]);
@@ -328,11 +357,24 @@ static void comet_cheats_poll(void)
                 if (s_cheats[i] != v) { s_cheats[i] = v; changed = 1; }
             }
         }
+        /* AMOUNTS PATCH (fileparse) */
+        {
+            static const char *const amt_names[2] = { "thorium_amount", "stockpile_amount" };
+            for (int a = 0; a < 2; a++) {
+                size_t n = strlen(amt_names[a]);
+                if (strncmp(line, amt_names[a], n) == 0 && line[n] == '=') {
+                    int *slot = a ? &s_stockpile_amount : &s_thorium_amount;
+                    int v = comet_cheat_amount(line + n + 1, *slot, a ? 60 : 1000);
+                    if (*slot != v) { *slot = v; changed = 1; }
+                }
+            }
+        }
     }
     fclose(f);
     if (changed)
-        fprintf(stderr, "[cheats] file: thorium=%d buildables=%d stockpiles=%d health=%d\n",
-                s_cheats[0], s_cheats[1], s_cheats[2], s_cheats[3]);
+        /* AMOUNTS PATCH (logline) */
+        fprintf(stderr, "[cheats] file: thorium=%d (amount %d) buildables=%d stockpiles=%d (amount %d) health=%d\n",
+                s_cheats[0], s_thorium_amount, s_cheats[1], s_cheats[2], s_stockpile_amount, s_cheats[3]);
 }
 
 /* Stage 2: plant the Cheats menu's label strings in the unclaimed
@@ -399,16 +441,18 @@ static void comet_cheats_tick(void)
         /* Pin only when both shadow records carry their sentinel, so a
          * different layout can never be written by mistake. */
         if (comet_rd32(kBase + 0x1B0) == 0x7FFFFFFF && comet_rd32(kBase + 0x1D0) == 0x7FFFFFFF) {
-            comet_wr32(kBase + 0x1B4, 1000);
-            comet_wr32(kBase + 0x1D4, 1000);
-            float thf = 1000.0f; uint32_t thbits; memcpy(&thbits, &thf, 4);
+            /* AMOUNTS PATCH (thoriumpin) */
+            comet_wr32(kBase + 0x1B4, (uint32_t)s_thorium_amount);
+            comet_wr32(kBase + 0x1D4, (uint32_t)s_thorium_amount);
+            float thf = (float)s_thorium_amount; uint32_t thbits; memcpy(&thbits, &thf, 4);
             comet_wr32(kBase + 0x3C8, thbits);
         }
     }
     if (s_cheats[2]) {
         for (int p = 1; p < 2; p++)
             for (int k = 0; k < 8; k++)
-                comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, 60);
+                /* AMOUNTS PATCH (stockpilepin) */
+                comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, (uint16_t)s_stockpile_amount);
     }
     if (s_cheats[3]) {
         /* Infinite Health: pin the local player's current life to its

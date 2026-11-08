@@ -230,3 +230,20 @@ R1 build palette under All Buildables (the palette renders at the
 ship; the driven camera sits at the enemy base) — gate inputs were
 verified in memory in stage 1, and the palette is exercised in
 Jerry's own play.
+
+## Addendum (2026-11-07 evening): configurable pin amounts
+
+At Jerry's request the two numeric pins are configurable in the
+control file, with the safe values from the play tests as both the
+defaults and the hard upper clamps: `thorium_amount` (default 1000,
+max 1000 — larger spills the HUD gauge; see notes 043) and
+`stockpile_amount` (default 60, max 60 — larger floods the unit
+cap). Env seeds: CC_CHEAT_THORIUM_AMOUNT /
+CC_CHEAT_STOCKPILE_AMOUNT, same clamp. Amounts re-read on the
+file's mtime like the toggles, so an edit applies live.
+
+Verified in a driven match: thorium_amount=500 pinned both wallet
+records at 500 and stockpile_amount=25 pinned all unit stockpiles
+at 25; a live edit to thorium_amount=99999 re-pinned at the 1000
+clamp within seconds. Jerry's own ~/.cc_cheats was restored
+byte-identical after the test.
