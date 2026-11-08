@@ -303,3 +303,15 @@ exits to the parent menu with its selection preserved, and the
 chain length stays constant. One cosmetic remainder: the rebuilt
 submenu's highlight restarts on the first row. Investigation:
 notes 041 (redraw addendum).
+
+## 21. Pad reports at a vblank-like cadence (fork 1c4bd6b2)
+
+pad_poll_backend served a fresh pad report every 4 ms (250 Hz).
+Comet Crash counts fresh reports for its input timing (menu
+auto-repeat), so in states whose loop polls faster than 60 Hz
+the timing ran up to ~4x fast: on the real GPU the pause loop
+polls ~280x/s while front-end states poll slower, which is why
+pause menus overshot options and the front-end menus felt fine.
+The poll gate now defaults to a 16 ms cadence (one fresh report
+per vblank, as on hardware); PAD_POLL_INTERVAL_MS overrides
+(4 restores the old behaviour). Full investigation: notes 046.
