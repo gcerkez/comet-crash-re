@@ -47,3 +47,19 @@ tinny/bubbly quality complaint is not a rate error.**
 The decoder itself was already exonerated separately: minimp3
 and ffmpeg produce identical decodes of the soundtrack and SFX
 corpora (frame counts, durations, zero lost syncs).
+
+## Addendum (2026-11-08): anti-clip normalize built, opt-in
+
+Fork d7798d41: with AUDIO_MIX_NORM=1, a mix block that would
+hard-clip is scaled uniformly to peak 1.0 instead (waveform and
+relative balance preserved); blocks at or under full scale pass
+through bit-identical. Default remains the original hard clip.
+
+Light-load A/B (two driven boot-to-match captures, norm off vs
+on): neither capture clips (peaks 0.215 / 0.212, zero samples at
+the rail), overall peak/RMS match to run-to-run jitter — the
+normalize path demonstrably leaves ordinary audio untouched.
+Driven sessions cannot produce the heavy stacking that clips;
+the benefit case rides Jerry's real sessions (run with
+AUDIO_MIX_NORM=1 and compare against the overwhelm he reported).
+If his ears prefer it, the default flips.

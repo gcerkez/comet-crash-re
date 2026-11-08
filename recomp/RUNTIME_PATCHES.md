@@ -315,3 +315,12 @@ pause menus overshot options and the front-end menus felt fine.
 The poll gate now defaults to a 16 ms cadence (one fresh report
 per vblank, as on hardware); PAD_POLL_INTERVAL_MS overrides
 (4 restores the old behaviour). Full investigation: notes 046.
+
+## 22. Optional anti-clip mix normalize (fork d7798d41)
+
+The cellAudio mixer summed all ports into a block and hard-clipped
+to [-1, 1], squaring stacked peaks (the leading suspect for sounds
+"overwhelming" when several play at once; notes 047). With
+AUDIO_MIX_NORM=1, a block that would clip is scaled uniformly to
+peak 1.0 instead; sub-full-scale blocks are bit-identical, so solo
+sounds never change. Default off pending a heavy-load verdict.
