@@ -263,3 +263,43 @@ pass-dump display target is full width (content columns 9..1909,
 was 9..1535) with the bottom strip restored, a real-GPU window shows
 content to its right edge, and the entry-16 frame-rate protocol
 reads 72 fps over 60 s. Full investigation: notes 044.
+
+## 19. MP3 codec seam: validate frames, rebuild the reservoir, never wedge (fork, spu_mp3_codec.c)
+
+The MultiStream caller is frame-synchronous: it stages one MP3 frame
+and advances only by the codec's reported `consumed`. The original
+host codec trusted minimp3's byte count and kept one persistent
+decoder across streams, so a single failed or misparsed frame
+(a straddle over stale staged bytes, or a stream switch polluting
+the bit reservoir) broke the reservoir chain for every later frame
+while `consumed=0` froze the caller's staging -- all audio died
+~60 s into a session, at match entry, and never returned
+(206k calls, 182k of them spinning on one frame). The seam now:
+(1) accepts a decode only when minimp3's byte count equals the
+header-computed frame length; (2) treats a format change as a new
+stream (decoder + tail reset); (3) keeps a whole-frame tail of
+recently consumed frames and, on failure, replays it through a
+fresh decoder to rebuild the bit reservoir exactly before decoding
+the staged frame; (4) as a last resort consumes the header length
+and emits one silent frame, so the caller's staging always
+advances. Verified on the drive that wedged before: 9,399 calls,
+99.1% consuming, uniform through the match, real PCM throughout.
+Full investigation: notes 045.
+
+## 20. Cheats toggles refresh in place: unlink, then rebuild (lift patch, amends 14/15)
+
+A flip originally returned without rebuilding, so the row label
+showed the old state until the submenu was reopened. A bare
+builder re-run fixed the label but stacked a stale submenu copy
+on every flip: the builder inserts the fresh menu at the menu-list
+anchor (game object + 0x53654C, guest 0x844B4C) without removing
+the old one, and Circle then waded back through outdated copies.
+Each flip block now first calls the game's own unlink-and-close
+helper FUN_001339E0 with the anchor address -- removing exactly
+the open submenu, as a Circle press does -- and then re-runs the
+builder. Driven-verified from both Options and the pause menu's
+Settings: the flipped row's label updates immediately, one Circle
+exits to the parent menu with its selection preserved, and the
+chain length stays constant. One cosmetic remainder: the rebuilt
+submenu's highlight restarts on the first row. Investigation:
+notes 041 (redraw addendum).
