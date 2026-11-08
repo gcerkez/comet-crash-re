@@ -243,3 +243,23 @@ tiles land in one surface at their exact rects, the presented frame
 shows the whole board, and real-GPU frame rate is unchanged (71 fps
 over a 60 s window, the entry-16 protocol). Full investigation:
 notes 043.
+
+## 18. Backend blits clip an edge overshoot instead of dropping (fork 4a97c240)
+
+`vk_eng_color_target_blit` silently returned whenever a blit rect
+overshot either surface's extent. This title's twelve scene-resolve
+tiles use (1,1)-based source origins in sample space, so the far
+column ends at 3073+768 = 3841 > 3840 and the far row at
+2049+112 = 2161 > 2160: six of the twelve tiles were dropped every
+frame, and the resolve texture's right 384 columns and bottom 56
+rows stayed black — a hard black band at the frame's right edge in
+gameplay (the bottom loss hid under the HUD bar). The RSX clips such
+reads at the surface edge, as does the CPU fallback path. The fix
+shrinks only the overflowing source extent (the destination keeps
+its size; the edge texel stretches by less than one sample), shrinks
+both extents proportionally on a destination overshoot, and still
+drops blits that start outside either surface. Verified: the
+pass-dump display target is full width (content columns 9..1909,
+was 9..1535) with the bottom strip restored, a real-GPU window shows
+content to its right edge, and the entry-16 frame-rate protocol
+reads 72 fps over 60 s. Full investigation: notes 044.
