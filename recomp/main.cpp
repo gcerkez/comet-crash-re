@@ -265,6 +265,14 @@ static DWORD WINAPI vk_present_worker(LPVOID)
  * 1000 (larger values spill the HUD gauge across the screen) and
  * stockpiles 60 per type (larger values flood the unit cap and break
  * abilities such as thief conversion). */
+/* ------------------------------------------------------------------ */
+/* Stage 3 (2026-11-08): cheats are per player. The submenu gains a    */
+/* "Player: N" selector row (the game's own option-row idiom: press   */
+/* to cycle); the four toggle rows below it show and flip the         */
+/* selected player's toggles. Battle fields up to four players        */
+/* (stat-array slots 0-3 in join order); Campaign's local human is    */
+/* Player 1 (slot 1) and its AI opponent is never a cheat target.     */
+/* See notes/RECONSTRUCTION-049.                                      */
 /* AMOUNTS PATCH (state) */
 static int s_thorium_amount   = 1000;
 static int s_stockpile_amount = 60;
@@ -280,7 +288,13 @@ static int comet_cheat_amount(const char *s, int def, int max)
 }
 
 #define COMET_CHEAT_COUNT 4
-static int s_cheats[COMET_CHEAT_COUNT] = { 0, 0, 0, 0 };
+#define COMET_PLAYER_COUNT 4
+/* STAGE3 PATCH (state): toggles are per player: s_cheats[player][idx].
+   s_cur_player is the player the in-game submenu is showing (its
+   Player row cycles it). Player numbering is the on-screen one; the
+   tick maps players to stat-array slots per mode (see the tick). */
+static int s_cheats[COMET_PLAYER_COUNT][COMET_CHEAT_COUNT] = { { 0, 0, 0, 0 } };
+static int s_cur_player = 0;
 static const char *const s_cheat_names[COMET_CHEAT_COUNT] = { "thorium", "buildables", "stockpiles", "health" };
 
 static uint32_t comet_rd32(uint32_t guest_addr)
@@ -302,11 +316,22 @@ static void comet_wr16(uint32_t guest_addr, uint16_t v)
 
 extern "C" int comet_cheats_get(int idx)
 {
-    return (idx >= 0 && idx < COMET_CHEAT_COUNT) ? s_cheats[idx] : 0;
+    /* STAGE3 PATCH (getflip): the submenu shows the selected player. */
+    return (idx >= 0 && idx < COMET_CHEAT_COUNT) ? s_cheats[s_cur_player][idx] : 0;
 }
 extern "C" void comet_cheats_flip(int idx)
 {
-    if (idx >= 0 && idx < COMET_CHEAT_COUNT) s_cheats[idx] = !s_cheats[idx];
+    if (idx >= 0 && idx < COMET_CHEAT_COUNT)
+        s_cheats[s_cur_player][idx] = !s_cheats[s_cur_player][idx];
+}
+/* STAGE3 PATCH (getflip): Player selector row bridge for the lift. */
+extern "C" int comet_cheats_get_player(void)
+{
+    return s_cur_player;
+}
+extern "C" void comet_cheats_cycle_player(void)
+{
+    s_cur_player = (s_cur_player + 1) % COMET_PLAYER_COUNT;
 }
 
 static void comet_cheats_poll(void)
@@ -320,7 +345,20 @@ static void comet_cheats_poll(void)
             getenv("CC_CHEAT_THORIUM"), getenv("CC_CHEAT_BUILDABLES"), getenv("CC_CHEAT_STOCKPILES"), getenv("CC_CHEAT_HEALTH")
         };
         for (int i = 0; i < COMET_CHEAT_COUNT; i++)
-            if (envs[i] && envs[i][0] && strcmp(envs[i], "0") != 0) s_cheats[i] = 1;
+            if (envs[i] && envs[i][0] && strcmp(envs[i], "0") != 0) s_cheats[0][i] = 1;
+        /* STAGE3 PATCH (env): per-player seeds CC_CHEAT_P<N>_<NAME>. */
+        {
+            static const char *const upper[COMET_CHEAT_COUNT] = {
+                "THORIUM", "BUILDABLES", "STOCKPILES", "HEALTH"
+            };
+            for (int p = 1; p < COMET_PLAYER_COUNT; p++)
+                for (int i = 0; i < COMET_CHEAT_COUNT; i++) {
+                    char name[40];
+                    snprintf(name, sizeof name, "CC_CHEAT_P%d_%s", p + 1, upper[i]);
+                    const char *e = getenv(name);
+                    if (e && e[0] && strcmp(e, "0") != 0) s_cheats[p][i] = 1;
+                }
+        }
         /* AMOUNTS PATCH (env) */
         s_thorium_amount   = comet_cheat_amount(getenv("CC_CHEAT_THORIUM_AMOUNT"),
                                                 s_thorium_amount, 1000);
@@ -329,9 +367,19 @@ static void comet_cheats_poll(void)
         if (getenv("CC_CHEAT_THORIUM_AMOUNT") || getenv("CC_CHEAT_STOCKPILE_AMOUNT"))
             fprintf(stderr, "[cheats] env amounts: thorium=%d stockpiles=%d\n",
                     s_thorium_amount, s_stockpile_amount);
-        if (s_cheats[0] || s_cheats[1] || s_cheats[2] || s_cheats[3])
-            fprintf(stderr, "[cheats] env: thorium=%d buildables=%d stockpiles=%d health=%d\n",
-                    s_cheats[0], s_cheats[1], s_cheats[2], s_cheats[3]);
+        /* STAGE3 PATCH (env): per-player env log line. */
+        {
+            int any_env = 0;
+            for (int p = 0; p < COMET_PLAYER_COUNT; p++)
+                for (int i = 0; i < COMET_CHEAT_COUNT; i++)
+                    any_env |= s_cheats[p][i];
+            if (any_env)
+                fprintf(stderr, "[cheats] env: P1 t%d b%d s%d h%d | P2 t%d b%d s%d h%d | P3 t%d b%d s%d h%d | P4 t%d b%d s%d h%d\n",
+                        s_cheats[0][0], s_cheats[0][1], s_cheats[0][2], s_cheats[0][3],
+                        s_cheats[1][0], s_cheats[1][1], s_cheats[1][2], s_cheats[1][3],
+                        s_cheats[2][0], s_cheats[2][1], s_cheats[2][2], s_cheats[2][3],
+                        s_cheats[3][0], s_cheats[3][1], s_cheats[3][2], s_cheats[3][3]);
+        }
     }
     if ((++s_frame % 30) != 0) return;
     const char *path = getenv("CC_CHEATS_FILE");
@@ -350,11 +398,22 @@ static void comet_cheats_poll(void)
     char line[128];
     int changed = 0;
     while (fgets(line, sizeof line, f)) {
-        for (int i = 0; i < COMET_CHEAT_COUNT; i++) {
-            size_t n = strlen(s_cheat_names[i]);
-            if (strncmp(line, s_cheat_names[i], n) == 0 && line[n] == '=') {
-                int v = (line[n + 1] == '1') ? 1 : 0;
-                if (s_cheats[i] != v) { s_cheats[i] = v; changed = 1; }
+        /* STAGE3 PATCH (fileparse): legacy "thorium=1" lines address
+           Player 1; "p2_thorium=1" .. "p4_health=0" address Players
+           2-4. */
+        {
+            int p = 0;
+            const char *rest = line;
+            if (line[0] == 'p' && line[1] >= '2' && line[1] <= '4' && line[2] == '_') {
+                p = line[1] - '1';
+                rest = line + 3;
+            }
+            for (int i = 0; i < COMET_CHEAT_COUNT; i++) {
+                size_t n = strlen(s_cheat_names[i]);
+                if (strncmp(rest, s_cheat_names[i], n) == 0 && rest[n] == '=') {
+                    int v = (rest[n + 1] == '1') ? 1 : 0;
+                    if (s_cheats[p][i] != v) { s_cheats[p][i] = v; changed = 1; }
+                }
             }
         }
         /* AMOUNTS PATCH (fileparse) */
@@ -373,8 +432,13 @@ static void comet_cheats_poll(void)
     fclose(f);
     if (changed)
         /* AMOUNTS PATCH (logline) */
-        fprintf(stderr, "[cheats] file: thorium=%d (amount %d) buildables=%d stockpiles=%d (amount %d) health=%d\n",
-                s_cheats[0], s_thorium_amount, s_cheats[1], s_cheats[2], s_stockpile_amount, s_cheats[3]);
+        /* STAGE3 PATCH (filelog): per-player file log line. */
+        fprintf(stderr, "[cheats] file: P1 t%d b%d s%d h%d | P2 t%d b%d s%d h%d | P3 t%d b%d s%d h%d | P4 t%d b%d s%d h%d (amounts thorium=%d stockpiles=%d)\n",
+                s_cheats[0][0], s_cheats[0][1], s_cheats[0][2], s_cheats[0][3],
+                s_cheats[1][0], s_cheats[1][1], s_cheats[1][2], s_cheats[1][3],
+                s_cheats[2][0], s_cheats[2][1], s_cheats[2][2], s_cheats[2][3],
+                s_cheats[3][0], s_cheats[3][1], s_cheats[3][2], s_cheats[3][3],
+                s_thorium_amount, s_stockpile_amount);
 }
 
 /* Stage 2: plant the Cheats menu's label strings in the unclaimed
@@ -392,6 +456,9 @@ static void comet_cheats_plant_labels(void)
         { 0x060, "Buildables: On" }, { 0x080, "Buildables: Off" },
         { 0x0A0, "Stockpiles: On" }, { 0x0C0, "Stockpiles: Off" },
         { 0x0E0, "Health: On" },     { 0x100, "Health: Off" },
+        /* STAGE3 PATCH (labels): submenu Player selector row. */
+        { 0x120, "Player: 1" },      { 0x140, "Player: 2" },
+        { 0x160, "Player: 3" },      { 0x180, "Player: 4" },
     };
     for (unsigned i = 0; i < sizeof kLabels / sizeof kLabels[0]; i++)
         memcpy(vm_base + 0x21010000 + kLabels[i].off, kLabels[i].text,
@@ -411,58 +478,91 @@ static void comet_cheats_tick(void)
     uint32_t state = comet_rd32(kBase + 0x005520C0);
     int in_match = (state == 13 || state == 14);
 
+    /* STAGE3 PATCH (tick): per-player pins. The mode word at
+     * +0x55209C is 2 in Battle, 0 in Campaign (verified live
+     * 2026-11-08; mission ids alongside: Battle 101, Campaign 1).
+     * Battle: Player N -> slot N-1. Otherwise: Player 1 -> slot 1
+     * (the local human), Players 2/3 -> slots 2/3 (inactive in
+     * Campaign), Player 4 -> no slot. Slot 0 outside Battle -- the
+     * Campaign AI opponent -- is never pinned. */
+    int battle = (comet_rd32(kBase + 0x0055209C) == 2);
+    int slot_of[COMET_PLAYER_COUNT];
+    for (int p = 0; p < COMET_PLAYER_COUNT; p++)
+        slot_of[p] = battle ? p : (p < 3 ? p + 1 : -1);
+    int any_buildables = 0;
+    for (int p = 0; p < COMET_PLAYER_COUNT; p++)
+        any_buildables |= s_cheats[p][1];
+
     /* Buildables: requirement-table neutralise/restore is edge-triggered
-     * (the table is static data; patch once, restore on toggle off). */
-    if (s_cheats[1] && !s_req_patched) {
+     * (the table is static data; patch once, restore when no player's
+     * toggle remains on). The table is shared by all seats, so in
+     * Battle one player's Buildables opens the palette for everyone;
+     * the per-seat tech-mask bits below stay individual. */
+    if (any_buildables && !s_req_patched) {
         for (int i = 0; i < 28; i++) {
             s_req_orig[i] = comet_rd32(0x0017F330 + i * 20);
             comet_wr32(0x0017F330 + i * 20, 0);
         }
         s_req_patched = 1;
         fprintf(stderr, "[cheats] requirement table neutralised\n");
-    } else if (!s_cheats[1] && s_req_patched) {
+    } else if (!any_buildables && s_req_patched) {
         for (int i = 0; i < 28; i++)
             comet_wr32(0x0017F330 + i * 20, s_req_orig[i]);
         s_req_patched = 0;
         fprintf(stderr, "[cheats] requirement table restored\n");
     }
-    if (s_cheats[1] && in_match) {
-        /* Local player = stat-array index 1; index 0 is the opponent
-           (verified live in Battle + Campaign, 2026-11-07). */
-        for (int p = 1; p < 2; p++) {
-            uint32_t a = kBase + 0x302 + p * 0x80;
+    if (any_buildables && in_match) {
+        for (int p = 0; p < COMET_PLAYER_COUNT; p++) {
+            int slot = slot_of[p];
+            if (slot < 0 || !s_cheats[p][1]) continue;
+            uint32_t a = kBase + 0x302 + slot * 0x80;
             comet_wr16(a, (uint16_t)(comet_rd16(a) | 0x0030));
         }
     }
 
     if (!in_match) return;
 
-    if (s_cheats[0]) {
-        /* Pin only when both shadow records carry their sentinel, so a
-         * different layout can never be written by mistake. */
-        if (comet_rd32(kBase + 0x1B0) == 0x7FFFFFFF && comet_rd32(kBase + 0x1D0) == 0x7FFFFFFF) {
+    /* Thorium: the authoritative balance is the float channel in each
+     * player's stat block (+0x348 + slot*0x80); pin it per player.
+     * The shared u32 shadow pair (+0x1B4/+0x1D4) keeps following the
+     * slot-1 player exactly as the stage-1/2 pin did (Campaign: that
+     * is Player 1, the human; Battle: Player 2), and only while that
+     * player's Thorium toggle is on. Pin the pair only when both
+     * shadow records carry their sentinel, so a different layout can
+     * never be written by mistake. */
+    {
+        float thf = (float)s_thorium_amount; uint32_t thbits; memcpy(&thbits, &thf, 4);
+        for (int p = 0; p < COMET_PLAYER_COUNT; p++) {
+            int slot = slot_of[p];
+            if (slot < 0 || !s_cheats[p][0]) continue;
             /* AMOUNTS PATCH (thoriumpin) */
+            comet_wr32(kBase + 0x348 + slot * 0x80, thbits);
+        }
+        int pair_player = battle ? 1 : 0;
+        if (s_cheats[pair_player][0] &&
+            comet_rd32(kBase + 0x1B0) == 0x7FFFFFFF && comet_rd32(kBase + 0x1D0) == 0x7FFFFFFF) {
             comet_wr32(kBase + 0x1B4, (uint32_t)s_thorium_amount);
             comet_wr32(kBase + 0x1D4, (uint32_t)s_thorium_amount);
-            float thf = (float)s_thorium_amount; uint32_t thbits; memcpy(&thbits, &thf, 4);
-            comet_wr32(kBase + 0x3C8, thbits);
         }
     }
-    if (s_cheats[2]) {
-        for (int p = 1; p < 2; p++)
+    for (int p = 0; p < COMET_PLAYER_COUNT; p++) {
+        int slot = slot_of[p];
+        if (slot < 0) continue;
+        if (s_cheats[p][2]) {
             for (int k = 0; k < 8; k++)
                 /* AMOUNTS PATCH (stockpilepin) */
-                comet_wr16(kBase + 0x364 + p * 0x80 + k * 2, (uint16_t)s_stockpile_amount);
-    }
-    if (s_cheats[3]) {
-        /* Infinite Health: pin the local player's current life to its
-         * per-match maximum (see the address notes at the top of this
-         * section). 2-byte write only -- the neighbouring i16 at
-         * +0x3DA is the units-waiting counter. When the max reads 0
-         * the match has not been filled in yet; skip. */
-        int16_t max_life = (int16_t)comet_rd16(kBase + 0x3532);
-        if (max_life > 0)
-            comet_wr16(kBase + 0x3D8, (uint16_t)max_life);
+                comet_wr16(kBase + 0x364 + slot * 0x80 + k * 2, (uint16_t)s_stockpile_amount);
+        }
+        if (s_cheats[p][3]) {
+            /* Infinite Health, per player: pin current life (i16 at
+             * block +0x58) to the per-match maximum (i16 array at
+             * +0x3530 + slot*2). 2-byte write only -- the neighbouring
+             * i16 at block +0x5A is the units-waiting counter. When
+             * the max reads 0 the seat is inactive; skip. */
+            int16_t max_life = (int16_t)comet_rd16(kBase + 0x3530 + slot * 2);
+            if (max_life > 0)
+                comet_wr16(kBase + 0x300 + slot * 0x80 + 0x58, (uint16_t)max_life);
+        }
     }
 }
 

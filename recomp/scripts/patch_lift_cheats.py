@@ -41,6 +41,14 @@ Assert-anchored and idempotent per edit: a file with the stage-2
 edits but without Edit 6 gets only Edit 6; a fully patched file
 exits 0 without changes. Usage:
     patch_lift_cheats.py <path-to-ppu_recomp_000.cpp>
+
+Stage 3 (2026-11-08) is folded in the same way (marker "CHEATS
+STAGE3", applied by apply_stage3 on both the fresh and the
+already-stage-2 paths): a "Player: N" selector row (opcode 49) at
+the top of the submenu cycles the glue's selected player; the four
+toggle rows beneath it show/flip that player's toggles via the
+unchanged comet_cheats_get/flip bridge. See
+notes/RECONSTRUCTION-049.
 """
 import sys
 
@@ -92,14 +100,103 @@ def apply_edit6(s):
         "edit6 post-count != 2"
     return s
 
-if "CHEATS PATCH" in src and EDIT6_MARKER in src:
+STAGE3_MARKER = "CHEATS STAGE3"
+
+def apply_stage3(s):
+    """Stage 3: Player selector row in the Cheats submenu.
+
+    T1: bridge declarations for comet_cheats_get_player /
+        comet_cheats_cycle_player next to the stage-2 externs.
+    T2: opcode 49 intercept -> loc_cheats_cycle.
+    T3: the "Player: N" row appended FIRST in loc_cheats_build
+        (temp gpr[1]+0x738, following the row idiom; label address
+        computed from the glue's selected player, strings planted
+        at 0x21010120 + player*0x20).
+    T4: loc_cheats_cycle block (cycle + unlink + rebuild, exactly
+        the flip blocks' shape) after loc_cheats_flip3.
+    """
+    if STAGE3_MARKER in s:
+        return s
+
+    def rep(old, new, tag):
+        nonlocal s
+        assert s.count(old) == 1, f"stage3 anchor '{tag}' count={s.count(old)}"
+        s = s.replace(old, new)
+
+    rep('''extern "C" int  comet_cheats_get(int idx);
+extern "C" void comet_cheats_flip(int idx);''',
+        '''extern "C" int  comet_cheats_get(int idx);
+extern "C" void comet_cheats_flip(int idx);
+/* === CHEATS STAGE3: Player selector bridge === */
+extern "C" int  comet_cheats_get_player(void);
+extern "C" void comet_cheats_cycle_player(void);''',
+        "t1-externs")
+
+    rep('''        if ((uint32_t)ctx->gpr[4] == 47) goto loc_cheats_flip3;   /* Health toggle */''',
+        '''        if ((uint32_t)ctx->gpr[4] == 47) goto loc_cheats_flip3;   /* Health toggle */
+        /* === CHEATS STAGE3: Player selector (opcode 49) === */
+        if ((uint32_t)ctx->gpr[4] == 49) goto loc_cheats_cycle;   /* Player row */''',
+        "t2-intercept")
+
+    player_row = '''        /* === CHEATS STAGE3: Player selector row (appended first) === */
+        ctx->gpr[11] = ctx->gpr[1] + (int64_t)(0x738);
+        ctx->gpr[29] = ppc_rldicl(ctx->gpr[11], 0, 32);
+        ctx->gpr[4] = (int64_t)(uint32_t)(0x21010120u + (uint32_t)comet_cheats_get_player() * 0x20u);
+        ctx->gpr[3] = ctx->gpr[29] | ctx->gpr[29];
+        ctx->lr = 0x000FA184; func_000D9218(ctx); DRAIN_TRAMPOLINE(ctx);
+        /* nop */;
+        ctx->gpr[3] = ctx->gpr[30] | ctx->gpr[30];
+        ctx->gpr[4] = ctx->gpr[29] | ctx->gpr[29];
+        ctx->gpr[5] = (int64_t)(int32_t)(49);
+        ctx->gpr[6] = (int64_t)(int32_t)(0);
+        ctx->gpr[7] = (int64_t)(int32_t)(0);
+        ctx->gpr[8] = (int64_t)(int32_t)(0);
+        ctx->gpr[9] = (int64_t)(int32_t)(0);
+        ctx->gpr[10] = (int64_t)(int32_t)(0);
+        ctx->lr = 0x000FA1AC; func_001533D0(ctx); DRAIN_TRAMPOLINE(ctx);
+        /* nop */;
+        ctx->gpr[28] = (int64_t)(int32_t)(0xF);
+        ctx->gpr[31] = (int64_t)(int32_t)(0);
+        vm_write32(ctx->gpr[1] + 0x750, ctx->gpr[28]);
+        vm_write32(ctx->gpr[1] + 0x74C, ctx->gpr[31]);
+        vm_write8(ctx->gpr[1] + 0x73C, ctx->gpr[31]);
+'''
+    thorium_anchor = '''        ctx->gpr[11] = ctx->gpr[1] + (int64_t)(0x71C);
+        ctx->gpr[29] = ppc_rldicl(ctx->gpr[11], 0, 32);
+        ctx->gpr[4] = (int64_t)(uint32_t)(comet_cheats_get(0) ? 0x21010020u : 0x21010040u);'''
+    rep(thorium_anchor, player_row + thorium_anchor, "t3-player-row")
+
+    # T4 anchor: flip3 is the last flip block, immediately before
+    # loc_000F6BBC. (The flip blocks' comment text differs between
+    # the folded script form and the tools lift's original
+    # redraw+unlink form; the tail lines are identical in both.)
+    rep('''        goto loc_cheats_build;
+loc_000F6BBC:''',
+        '''        goto loc_cheats_build;
+loc_cheats_cycle:
+        /* === CHEATS STAGE3: cycle the selected player, then the
+           same unlink + rebuild as the toggle flips. === */
+        comet_cheats_cycle_player();
+        ctx->gpr[3] = (int64_t)(uint32_t)(0x844B4Cu);
+        ctx->lr = 0x000F6BB0; func_001339E0(ctx); DRAIN_TRAMPOLINE(ctx);
+        goto loc_cheats_build;
+loc_000F6BBC:''',
+        "t4-cycle-block")
+    return s
+
+if "CHEATS PATCH" in src and EDIT6_MARKER in src and "CHEATS STAGE3" in src:
     print("already patched:", PATH)
     sys.exit(0)
 
 if "CHEATS PATCH" in src:
-    # Stage-2 edits already applied (e.g. the tools lift): Edit 6 only.
-    open(PATH, "w").write(apply_edit6(src))
-    print("stage-2 lift patch: edit 6 applied to", PATH)
+    # Stage-2 edits already applied (e.g. the tools lift): apply only
+    # the missing incremental edits (Edit 6, then stage 3).
+    out = src
+    if EDIT6_MARKER not in out:
+        out = apply_edit6(out)
+    out = apply_stage3(out)
+    open(PATH, "w").write(out)
+    print("stage-2/3 lift patch: incremental edits applied to", PATH)
     sys.exit(0)
 
 def rep(old, new, tag):
@@ -281,6 +378,9 @@ rep('''        ctx->lr = 0x000F8544; func_001533D0(ctx); DRAIN_TRAMPOLINE(ctx);
 
 # --- Edit 6: the "Cheats" item in the pause Settings builder ----------
 src = apply_edit6(src)
+
+# --- Stage 3: Player selector row --------------------------------------
+src = apply_stage3(src)
 
 open(PATH, "w").write(src)
 print("stage-2 lift patch applied to", PATH)
