@@ -225,3 +225,21 @@ declines; non-AA blits are unchanged. Measured on the desktop's RX
 7900 XTX (1920x1080, same driven scene, 60 s window): 37.0 -> 71.0
 guest fps, and the readback/decode complex no longer appears in
 FIFO-thread stack samples. Full investigation: notes 042.
+
+## 17. Blit destinations sized from pitch, not one blit's rect (fork 4a6101c4)
+
+`rsx_draw_engine_blit` created a fresh destination surface at the
+blit's own rect size and offset. This title writes its scene-resolve
+texture as a grid of twelve offset-addressed NV3089 tiles per frame,
+so each tile spawned its own fragment surface; the texture sampler
+resolves the buffer's base offset, and the frame sampled a single
+tile stretched over the screen -- the gameplay view looked locked
+into the board's bottom-left corner at high magnification, split by
+a seam. The fix sizes a newly created blit destination from the
+destination pitch (the buffer's row width), and a frame-wide buffer
+takes the frame's height as well, so the first tile creates the
+whole surface and the rest resolve into it. Verified: all twelve
+tiles land in one surface at their exact rects, the presented frame
+shows the whole board, and real-GPU frame rate is unchanged (71 fps
+over a 60 s window, the entry-16 protocol). Full investigation:
+notes 043.
