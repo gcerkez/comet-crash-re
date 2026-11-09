@@ -53,10 +53,16 @@ MODULE = r'''
  * After the copy, host caches derived from guest memory are dropped
  * through the backend's ps3_rsx_flush_guest_caches (declared weak:
  * absent on other backends, where the engine's content hashes still
- * catch texture changes on their own). Audio is deliberately not
- * reset in v1; the mixer re-reads its guest ring state every block.
+ * catch texture changes on their own). On load, two host
+ * subsystems are re-synced per the Phase-1 findings (notes 051):
+ * the pad backend's admission state (ps3_pad_resync_savestate)
+ * and the host MP3 codec's stream table
+ * (ps3_spu_mp3_reset_streams). The mixer itself is not reset;
+ * it re-reads its guest ring state every block.
  * -----------------------------------------------------------------------*/
 extern "C" void ps3_rsx_flush_guest_caches(void) __attribute__((weak));
+extern "C" void ps3_pad_resync_savestate(void) __attribute__((weak));
+extern "C" void ps3_spu_mp3_reset_streams(void) __attribute__((weak));
 
 namespace {
 
@@ -210,14 +216,17 @@ int ss_do_load(void)
 {
     if (!vm_base) return 0;
     const uint32_t state = comet_rd32(kSsStateAddr);
-    /* SAVESTATE PATCH (gate): the front-end idles in state 11 in this
-     * title (observed live at the title screen), not in states <=6 as
-     * the dispatch table alone suggested. Loading is allowed from the
-     * front-end (11), gameplay (13) and pause (14); state 12
-     * (pre-flight / battle-end flow) and 7-10 stay refused. */
-    if (!(state <= 6 || state == 11 || state == 13 || state == 14)) {
-        fprintf(stderr, "[LOAD] refused: guest state %u (need front-end "
-                "11, gameplay 13 or pause 14)\n", state);
+    /* SAVESTATE PATCH (gate v3): pause only. Phase 1 (notes 051)
+     * proved the sound restore target is a pause in the same
+     * mission the process entered itself: a title-screen load
+     * transplants RAM faithfully but the title scene's SPURS
+     * chain never simulates the restored match, and in-place /
+     * gameplay loads desync the host runtime. State 14 is the
+     * only state whose host-side phase agrees with a pause
+     * snapshot, so it is the only state load is offered in. */
+    if (state != 14) {
+        fprintf(stderr, "[LOAD] refused: guest state %u (need 14 pause)\n",
+                state);
         return 0;
     }
     char path[1024];
@@ -304,6 +313,12 @@ int ss_do_load(void)
         memcpy(vm_base + addr, rec + sizeof addr, kSsPage);
     }
     free(blob);
+    /* SAVESTATE PATCH (resync): Phase 1 (notes 051) -- the pad
+     * backend's admission state and the MP3 codec's stream table
+     * belong to the current timeline; reset both so the restored
+     * match is driven by fresh host state. */
+    if (ps3_pad_resync_savestate) ps3_pad_resync_savestate();
+    if (ps3_spu_mp3_reset_streams) ps3_spu_mp3_reset_streams();
     const ULONGLONG ms = GetTickCount64() - t0;
     fprintf(stderr, "[LOAD] %s: %llu pages, span 0x%llX, mission %u mode %u "
             "(saved in state %u) restored over state %u, %llu ms\n",
