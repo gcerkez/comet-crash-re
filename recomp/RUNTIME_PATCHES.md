@@ -475,3 +475,43 @@ it rides a host-FIFO design that conflicts with this fork's
 deadline pacing + backlog drop/resync (885b5bab). Fork dd777aee.
 Driven verification: machinery live in the stats lines, zero
 false triggers on a quiet menu workload.
+
+## #29 - Denormal flush (DAZ/FTZ) around lifted SPU runs (SPU_FTZ)
+
+The SPU has no denormal numbers; x86 hosts pay a microcode
+assist when lifted SPU arithmetic produces or consumes them,
+and denormal-heavy guest code (the MultiStream synth) made
+audio replies late in Soulbrandt's title. The fork already
+bracketed every lifted run with a float-mode enter/leave pair
+(the arm64 FPCR path); on x86-64 that pair now also saves the
+caller's MXCSR, sets FTZ|DAZ for the run, and restores it at
+the single epilogue (halts included). SPU_FTZ=0 opts out;
+rounding is untouched and SPU_SCALAR_HELPERS builds are
+excluded. Semantics argument: the SPU flushes denormals by
+construction, so lifted results are identical - only the
+host's assist cost changes. Fork b6b7c925. Driven verification:
+boot to frame 1680 at 1920x1080; a menu capture contained
+exactly the two driven beeps.
+
+## #30 - Quadword shift helpers: per-word formulation
+
+spu_shlqbii / spu_rotqbii and their bit-form siblings assembled
+two 64-bit halves, shifted, and disassembled - per call, in
+helpers every lifted SPU job uses constantly. Ported from
+haze-recomp (3e97896): per-word shifts the host can vectorize;
+the bit forms delegate or wrap a shared right-shift core.
+Correctness gate: a standalone old-vs-new sweep - 20,151
+vectors x the full shift ranges = 10,156,104 comparisons, 0
+mismatches - and the committed bodies are token-identical to
+the sweep-tested text. Fork 0691abed.
+
+## #31 - SDL audio buffer 1024 frames (AUDIO_SDL_FRAMES)
+
+The mixer requested a 256-frame SDL buffer (5.3 ms) - on
+PipeWire desktops Soulbrandt measured that buffer running
+short 12-14% of the time under load, and never at 1024. The
+device request is now 1024 frames by default, env
+AUDIO_SDL_FRAMES (clamped 256..4096); our mixer's deadline
+pacing and drop/resync stay in charge of timing. The boot log
+confirms the grant ("SDL device: freq=48000 ch=2
+samples=1024"). Fork d7430289.
