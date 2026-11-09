@@ -210,25 +210,28 @@ for the analysis and what a further override would require.
 
 ## Save states (experimental)
 
-On the `muse/save-states` branch the recomp can snapshot a
+On the `muse/savestates` branch the recomp can snapshot a
 match: pause the game and press **F5** to write
 `~/tools/cc-recomp/saves/slot1.ccsave` (~110 MB, uncompressed);
-**F9** loads it back (from a pause - loads are only offered
-there). On load the runtime re-syncs its pad admission state
-and resets the host MP3 codec's stream table. Restores are
-byte-exact - the saved mission, mode,
-units and resources come back precisely, and the mission id in
-the snapshot is what the game's own progression code would
-credit on a clear.
+**F9** loads it back (from a pause — loads are only offered
+there). The supported flow is: save in one session, then in
+a fresh session enter the same mission, pause, and load.
+The restore runs stop-the-world (the process freezes for
+~0.25 s while the snapshot is written back), re-syncs the
+pad admission state and the host MP3 codec's stream table,
+and the match **resumes and plays**. Restores are byte-exact:
+the saved mission, mode, units and resources come back
+precisely, and the mission id in the snapshot is what the
+game's own progression code credits on a clear.
 
-**Current limit, stated plainly:** after an in-game load the
-restored match does not resume - the simulation stays frozen,
-or the game leaves the match - because the restore cannot yet
-stop and re-sync the runtime's own threads the way the
-prototype's external tool could. The design, the test evidence
-(including the one flow that does resume today) and the known
-issues are in `notes/051-save-states.md`. Treat F5/F9 as an
-experimental snapshot mechanism, not a finished save feature.
+**Current limits, stated plainly:** loading a save *in the
+same session it was saved in*, after playing on past the
+save point (an in-place rewind), still leaves the restored
+match frozen — the guest's own threads have run past the
+snapshot and do not re-sync. Battle-mode saves are untested.
+The design, the full test evidence and the known issues are
+in `notes/051-save-states.md`. Treat F5/F9 as an experimental
+snapshot mechanism, not a finished save feature.
 
 ## Known issues
 

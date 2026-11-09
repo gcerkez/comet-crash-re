@@ -516,7 +516,7 @@ pacing and drop/resync stay in charge of timing. The boot log
 confirms the grant ("SDL device: freq=48000 ch=2
 samples=1024"). Fork d7430289.
 
-## #32 - Save states (experimental, branch muse/save-states)
+## #32 - Save states (experimental, branch muse/savestates)
 
 F5 saves the current match to ~/tools/cc-recomp/saves/slot1.ccsave,
 F9 loads it. Glue module applied by
@@ -544,3 +544,19 @@ restore (the guest stops polling - the wedge is guest
 thread sync, not pad backend state); cross-instance loads
 still collapse the match. The stop-the-world gap vs the
 SIGSTOP prototype stands.
+v2 (round 3): the restore's page copy now runs
+stop-the-world — after total validation and the pad/codec
+resyncs, the glue forks a helper and SIGSTOPs the process;
+the child writes the snapshot through /proc/self/mem with
+raw syscalls only and SIGCONTs the parent on every path
+(failures classified: refused before the stop / nothing
+written, session unharmed / mid-write, session corrupt).
+The RSX guest-cache flush was REMOVED from the load path:
+with it, cross-process loads restored byte-exact but the
+guest never polled the pad again; without it, the leg-4
+in-glue load RESUMES (byte-exact at load, pad admissions
+advance, entity banks evolve; stop 226-240 ms at ~28.8k
+pages). Pad + codec resyncs remain. In-place
+later-timeline loads still wedge (guest thread sync),
+matching the Phase-1 leg-3 result. Evidence:
+notes/051-save-states.md, round 3.

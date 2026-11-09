@@ -405,7 +405,127 @@ re-tested (drives 12–13):
   v2 design step; everything else on the resync list is now
   in and measured.
 
-**Jerry's manual checks (real display, when a resume exists)**:
+
+### Phase 2, round 3 — v2: stop-the-world restore, and the resync that wedged it (drives 14–17, 2026-11-08/09)
+
+**Design (glue only; repo c9dec57).** `ss_do_load` keeps round
+2's total validation and pause-only gates. Then, in order:
+(1) the pad admission resync and the MP3 codec stream-table
+reset fire while the world still runs (host bookkeeping only;
+at the pause boundary guest match state is static, so they
+cannot race the snapshot, and the stopped window stays down
+to the page copy); (2) the `in_save` page bitmap is built;
+(3) the parent opens `/proc/self/mem` `O_RDWR` and mmaps a
+4 KiB `MAP_SHARED` status page; (4) `fork()` — the parent
+`raise(SIGSTOP)`s immediately, freezing every game thread;
+the child (raw syscalls only post-fork: no malloc, no stdio;
+blob, bitmap, zero page and scratch are all pre-allocated)
+waits for `/proc/<ppid>/stat` to report `T`, runs the
+zero-fill reconciliation (pread each absent page, pwrite the
+zero page only if nonzero), pwrites every stored page
+through the inherited mem fd, publishes counts on the status
+page, and `kill(ppid, SIGCONT)`s on **every** path before
+`_exit`. The parent resumes inside the stop, waitpids, and
+classifies: refusal-class failures (memfd/mmap/fork) happen
+before any stop with guest memory untouched; a child that
+wrote nothing leaves the session unharmed; a child that
+failed mid-write is logged as guest memory possibly mixed —
+consider the session corrupt and restart the game. The
+`[LOAD]` line gains `stop-the-world <ms>, total <ms>`. Save
+path and file format are unchanged; the Windows build keeps
+the round-1 live copy (no stop-the-world equivalent).
+
+**The bisect (the round's real finding).** Drive 14, first
+v2 build — all three round 1/2 resyncs firing, RSX flush
+included: the restore was byte-exact (post-load bank
+byte-sums == save byte-sums) with a 226 ms stop, yet the
+match did not resume — pad admissions frozen at 9, state
+stuck at 14. (No collapse this time: round 2's leg-4 tore
+down to state 0; atomicity fixed that much.) Drive 16 then
+restored the *same save file* the Phase-1 way — external
+SIGSTOP + `/proc/<pid>/mem` writes
+(`recomp/savestate/load_ccsv.py`), no resyncs at all — into
+a fresh process: **resumed** (admissions 7 → 8 on START,
+state 13, bank byte-sums evolving over 55 s, byte-exact at
+load). So the save content was never torn, and the copy's
+atomicity was never the remaining problem: a resync was.
+Removing all three resync calls from the glue (V2A) made
+the in-glue load resume (drive 14 rerun: admissions 9 → 10,
+state 13, presents 46 → 70 lines). The pad and codec
+resyncs are provably host-local (two hold counters; an
+8-entry stream table), so the RSX guest-cache flush is the
+convicted one — it is the only resync whose effects reach
+guest-visible machinery: the RSX FIFO and the surface
+bookkeeping span the guest/host boundary, and the snapshot
+already carries the guest half of that state; invalidating
+the host half against a rolled-back guest half wedges the
+guest's frame/input loop (it never calls cellPadGetData
+again, while rendering continues). The flush's fork commits
+(18ded31d, a9ec9227) stay in the fork — the exports are
+simply no longer called by the glue. **Final shape (repo
+5f6e1ed): pad + codec resyncs pre-stop; no RSX flush.**
+
+**Results on the final build (drive 17 = the drive-14
+battery, V2B).**
+
+- **T1 (leg-4 in-glue) — RESUMES.** Session A save: 28,791
+  pages, span 0x19200000, 184 ms. Session B (fresh boot, own
+  Kreios 1 match, paused): `[LOAD] … 28791 pages (+5
+  zero-filled) … stop-the-world 240 ms, total 240 ms`;
+  post-load observables == save observables byte-exact (bank
+  byte-sums 3249525225404672504 / 6193130047056848361);
+  START admitted (admissions 9 → 10); state 14 → 13 and
+  stayed; ~55 s later the bank byte-sums had evolved
+  (7954374762107302580 / 7936554956303338685), presents
+  43 → 74 lines, process alive. Session B's AUDIO_WAV grew
+  to ~69.7 MB across the window — the mixer runs through
+  the load (not sample-analysed this round).
+- **T4 (refusals).** No save file → `[LOAD] refused: no
+  save file …`, and the game stayed responsive in pause
+  (admissions 7 → 8 on the next press). Truncated file →
+  `[LOAD] refused: … corrupt or truncated; guest memory
+  untouched` (admissions 8 → 9). Both are refused during
+  total validation, before any fork or stop — a refused
+  load cannot freeze the game.
+- **T2 (in-place, later timeline; drive 15) — still
+  wedges.** Save 27,799 pages (span 0x18F00000, 166 ms);
+  after ~60 s of divergent play, load: 27,799 pages (+43
+  zero-filled), stop 226 ms; post-load observables == save
+  observables byte-exact — and admissions never moved again
+  (9 → 9 on START and on DOWN), state stuck at 14, presents
+  frozen. Same shape as Phase 1's leg 3 and round 2's
+  drive 13: in this configuration the guest's own threads
+  have run *past* the snapshot, and rolling memory back
+  under them wedges their synchronisation in a way no
+  host-side resync has fixed. Loading a save into a process
+  that entered the same mission fresh (T1) is the
+  supported flow; in-place rewind is not.
+- **T3 (progression).** The mission id and mode ride in
+  the snapshot header and restore byte-exact (mission 1,
+  mode 0 in every pair above), so a clear in a resumed
+  match is scored by the game's own progression code and
+  persisted by its own savedata write — the in-memory
+  prerequisites are verified. A *driven* clear was not
+  achieved (driven unit sends have never worked in the
+  headless rig), so the end-to-end win check stays on
+  Jerry's manual list below — now against a build whose
+  cross-process load resumes.
+- **Stop durations**: 226–240 ms across the round's loads
+  (~28.8k pages, ~113 MB written under SIGSTOP); total load
+  wall time equals the stop time to the millisecond on the
+  final build (everything before the stop is validation +
+  bitmap).
+
+**Still open.** In-place rewind (above); Battle-mode saves
+(untested); the pause backdrop after F9 on a real display
+(manual check 1 — headless presents carry no guest frame
+content, unchanged); save compression and a build-identity
+field in the header (future); whether the RSX-flush wedge
+also explains round 1's in-place diorama backdrop (the
+flush was in that path too — plausible, untested now that
+in-place wedges earlier, at input).
+
+**Jerry's manual checks (real display; a cross-process resume exists as of round 3 — run them on the savestate build)**:
 (1) pause backdrop after F9 shows the *saved* scene, not the
 scene you loaded from; (2) win the restored level and confirm
 the campaign map credits the mission and
