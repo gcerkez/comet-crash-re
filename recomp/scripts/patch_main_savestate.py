@@ -93,9 +93,34 @@ MODULE = r'''
  * carries the guest half of that state. The mixer itself
  * is not reset either; it re-reads its guest ring state
  * every block.
+ *
+ * Round 4 (SAVESTATE FIFO RESYNC): a real-user load on the real
+ * GPU restored the match but killed the picture -- fragment
+ * programs that translated fine pre-load failed HLSL
+ * translation after it ('array index out of range'), and a
+ * second attempt desynced the guest FIFO outright (unmapped
+ * JUMP + resync). Root cause: the host FIFO walker's position
+ * (fork-side s_fifo_getoff) is host-private state from the
+ * PRE-load session and nothing re-derived it from the restored
+ * guest state, so on resume the walker drained the restored
+ * ring from its stale offset -- replaying consumed history,
+ * parsing inline vertex/uniform payload as method headers
+ * (garbage state: absurd blits, poisoned shader/texture state,
+ * fragment programs decompiled from the wrong bytes), or
+ * hitting an unmapped JUMP. The fix is a walker hold + resync,
+ * not another cache flush: ps3_gcm_fifo_savestate_hold parks
+ * the walker with the pre-stop resyncs, and
+ * ps3_gcm_fifo_savestate_resync -- after the copy, on every
+ * outcome -- moves it to the restored guest context's current
+ * position and clears its pass state. Only host-private shadow
+ * state moves; guest-visible caches stay exactly as restored.
  * -----------------------------------------------------------------------*/
 extern "C" void ps3_pad_resync_savestate(void) __attribute__((weak));
 extern "C" void ps3_spu_mp3_reset_streams(void) __attribute__((weak));
+/* SAVESTATE FIFO RESYNC: the FIFO walker hold + resync
+ * (round 4, notes 051). */
+extern "C" void ps3_gcm_fifo_savestate_hold(void) __attribute__((weak));
+extern "C" void ps3_gcm_fifo_savestate_resync(void) __attribute__((weak));
 
 #ifndef _WIN32
 /* SAVESTATE PATCH (v2): POSIX surface for the stop-the-world
@@ -526,6 +551,12 @@ int ss_do_load(void)
      * banner for the drive evidence. */
     if (ps3_pad_resync_savestate) ps3_pad_resync_savestate();
     if (ps3_spu_mp3_reset_streams) ps3_spu_mp3_reset_streams();
+    /* SAVESTATE FIFO RESYNC: park the host FIFO walker before
+     * the copy and keep it parked until the resync below moves
+     * it to the restored guest position. Its position is
+     * host-private state from this session; left alone it
+     * would drain the restored ring from the wrong offset. */
+    if (ps3_gcm_fifo_savestate_hold) ps3_gcm_fifo_savestate_hold();
     /* Bitmap of the pages the save owns; the restore zero-fills
      * pages that are nonzero in the current span but absent from
      * the save (the Phase-1 reconciliation). */
@@ -545,6 +576,12 @@ int ss_do_load(void)
     }
 #ifndef _WIN32
     const int rc = ss_restore_stop_the_world(path, blob, &h, in_save, t0);
+    /* SAVESTATE FIFO RESYNC: memory is the saved session's
+     * again; move the walker to match before it drains
+     * anything (fires on every restore outcome -- on a
+     * pre-write failure the memory is still this session's
+     * and the resync is a position no-op). */
+    if (ps3_gcm_fifo_savestate_resync) ps3_gcm_fifo_savestate_resync();
     free(in_save);
     free(blob);
     return rc == 0 ? 1 : 0;
@@ -562,6 +599,8 @@ int ss_do_load(void)
         memcpy(&addr, rec, sizeof addr);
         memcpy(vm_base + addr, rec + sizeof addr, kSsPage);
     }
+    /* SAVESTATE FIFO RESYNC: as the POSIX path. */
+    if (ps3_gcm_fifo_savestate_resync) ps3_gcm_fifo_savestate_resync();
     free(in_save);
     free(blob);
     const ULONGLONG ms = GetTickCount64() - t0;
