@@ -213,8 +213,10 @@ for the analysis and what a further override would require.
 On the `muse/save-states` branch the recomp can snapshot a
 match: pause the game and press **F5** to write
 `~/tools/cc-recomp/saves/slot1.ccsave` (~110 MB, uncompressed);
-**F9** loads it back (in a match, at the pause, or at the title
-screen). Restores are byte-exact - the saved mission, mode,
+**F9** loads it back (from a pause - loads are only offered
+there). On load the runtime re-syncs its pad admission state
+and resets the host MP3 codec's stream table. Restores are
+byte-exact - the saved mission, mode,
 units and resources come back precisely, and the mission id in
 the snapshot is what the game's own progression code would
 credit on a clear.

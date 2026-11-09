@@ -533,3 +533,14 @@ leave the sim frozen, cross-instance loads into a paused match
 collapse it, while the external SIGSTOP prototype's leg-4 flow
 (same format) resumes and plays. Full evidence and the
 stop-the-world analysis: notes/051-save-states.md.
+Round 2 (same branch): load gate tightened to pause-only
+(Phase-1 verdict); fork 2ffc2da4 adds
+ps3_pad_resync_savestate (PAD_FILE hold statics hoisted +
+cleared on load, ports marked fresh), 98f63c11 its build
+fix, fda534c8 adds ps3_spu_mp3_reset_streams (codec stream
+table dropped on load). Measured: both resyncs fire on
+every load; pad admissions STILL freeze after an in-place
+restore (the guest stops polling - the wedge is guest
+thread sync, not pad backend state); cross-instance loads
+still collapse the match. The stop-the-world gap vs the
+SIGSTOP prototype stands.

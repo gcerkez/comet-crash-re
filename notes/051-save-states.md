@@ -352,3 +352,62 @@ The standing explanation is the missing stop-the-world step,
 with the pad/SPURS/codec resync list from Phase 1 still owed
 behind it. The README on this branch describes the feature
 with exactly that status.
+
+### Phase 2, round 2 — the Phase-1 resync list, applied and measured
+
+Phase 1's follow-up directives were implemented in full and
+re-tested (drives 12–13):
+
+- **Pad resync (fork 2ffc2da4, build fix 98f63c11)**: the
+  PAD_FILE/PAD_FILE2 injected-hold statics moved to file scope;
+  `ps3_pad_resync_savestate()` clears both holds and marks every
+  port fresh on load. It fires on every restore (log line
+  confirmed).
+- **Codec reset (fork fda534c8)**: `ps3_spu_mp3_reset_streams()`
+  zeroes the stream table on load; slots re-initialise on next
+  use. Fires on every restore (log line confirmed under
+  PS3_CODEC_LOG).
+- **Load gate v3 (glue)**: load is now **pause-only (state
+  14)**, per the Phase-1 verdict — a state-13 load attempt
+  refuses live (`[LOAD] refused: guest state 13 (need 14
+  pause)`). Save was already pause-only (gate v2).
+- **RSX backdrop**: the flush already invalidated presented
+  surfaces as well as textures (engine surfaces + backend
+  framebuffers both dropped — code-verified). A *visual*
+  backdrop check is not achievable in the headless rig: the
+  guest display buffers are all-zero in headless presents
+  (three dumps from different scenes byte-identical), and the
+  windowed front buffer never updated under llvmpipe. It is on
+  Jerry's manual list below.
+- **Outcomes**: the in-place restore is still byte-exact
+  (drive 13: post-load observables == save observables,
+  full equality) and still frozen. **Pad admissions still
+  freeze** — with the resync in the path, START/CROSS/DOWN
+  after an in-place load moved the `[cellPad] PAD_FILE press`
+  count not at all (7 -> 7 -> 7 -> 7). Since the backend now
+  provably resets its admission state, the freeze is *not* in
+  the pad backend: after the restore the guest simply stops
+  polling — cellPadGetData is never called again — which puts
+  the wedge in guest thread synchronisation (the frame/input
+  loop blocked on state the restore rolled back), the same
+  wall as the sim freeze. The cross-instance (leg-4) load
+  still collapses the target match (drive 12, identical
+  shape: resync lines, 63 ms restore, banks zeroed in the
+  first sample, state 0).
+- **Level clear**: still unreachable — a restored match must
+  resume before it can be won, and no in-glue load resumes
+  yet. The different-mission pause load was not attempted:
+  every load wedges before mission identity can matter.
+- **Standing conclusion**: with pad, codec, RSX and gating
+  all addressed, the one difference left between this and
+  Phase 1's working leg-4 restore is the SIGSTOP
+  stop-the-world (atomic capture and restore). That is the
+  v2 design step; everything else on the resync list is now
+  in and measured.
+
+**Jerry's manual checks (real display, when a resume exists)**:
+(1) pause backdrop after F9 shows the *saved* scene, not the
+scene you loaded from; (2) win the restored level and confirm
+the campaign map credits the mission and
+`NPUB30061-AUTO/SETTINGS.DAT` is rewritten; (3) music/SFX
+behave across the load.
