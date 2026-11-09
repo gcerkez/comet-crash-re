@@ -385,6 +385,19 @@ faster per call on transform-heavy shapes; in a heavy Battle the
 job vanishes from profile samples (the entity-sim job 00188300
 becomes the wall; see notes 050). Details: notes 050.
 
+**Pool tuning (fork 311a45a7).** A bench decomposition of the
+cull-heavy shape (16 groups x 128 elements) showed its groups fell
+below the element-pass pool floor (256 items), so every group's
+transform pass ran serially on the calling thread (~1.5 ms of the
+6.3 ms call). The element-pass threshold is now 128 with one chunk
+per worker, and both pool waits spin briefly before parking (256
+worker / 1000 caller pauses; long spins regress under CPU
+contention - 15 spinning workers starve the caller's serial
+phases). Cull-heavy: 6.32 -> 4.49 ms per call (-29%, medians of 6
+on a contended 16-core host); transform shapes flat to -6%;
+equivalence harness 0/3033 failures, three consecutive runs,
+against the byte-identical TU.
+
 ## #26 — Cheats stage 4: the Ship toggle, plus the stockpile aggregate fix
 
 Two changes, both in the host cheats module / lift patch family

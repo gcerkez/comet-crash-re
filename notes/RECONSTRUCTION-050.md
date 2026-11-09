@@ -365,3 +365,26 @@ as a compute override that keeps invoking its lifted DMA helper
 because 0x61F8's measured heat is the sum of its 10 callers and
 its in-region vs callee split is unknown. Fallback lever:
 optimising the recomp's SPU execution of this image generally.
+
+
+## Addendum - pool tuning (2026-11-08 evening)
+
+The override's weak bench shape was 16 groups x 128 elements with
+r7=1500 (cull-heavy): only ~1.04x the lifted job on a contended
+machine. A decomposition bracket (pool off / parallel cull off /
+fully serial) located the cost: pooled-vs-serial cull tests are
+worth only ~0.6 ms there, while the shape's 128-element groups fell
+below the transform pool's 256-item floor, so all 16 groups'
+transform passes ran serially on the calling thread (~1.5 ms of
+serial work per call). Fix (fork 311a45a7): element-pass pool
+threshold 256 -> 128, one chunk per worker for both passes, and
+short spin-then-park waits on the pool (256 worker pauses / 1000
+caller pauses). Long spins are a trap under contention: at a few
+thousand iterations they regressed every shape (cull-heavy 6.98 ms,
+transform shapes +22-25%) because 15 spinning workers steal cores
+from the caller's serial phases. Result (native avg per call,
+medians of 6, contended host, game running): cull-heavy 6.32 ->
+4.49 ms (-29%); g=8 e=256: 2.49 -> 2.51 (flat); g=4 e=300: 1.16 ->
+1.11; g=1 e=511: 0.41 -> 0.41; g=2 e=64: 0.19 -> 0.18. Equivalence:
+0/3033 failures, three consecutive runs, harness built from the
+final TU (byte-identical to the committed fork TU).
