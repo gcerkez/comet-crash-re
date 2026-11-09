@@ -560,3 +560,42 @@ pages). Pad + codec resyncs remain. In-place
 later-timeline loads still wedge (guest thread sync),
 matching the Phase-1 leg-3 result. Evidence:
 notes/051-save-states.md, round 3.
+
+## #33 - Savestate load: FIFO walker hold + resync (branch muse/savestates)
+
+Round 4 of #32 (notes 051). A cross-process load restored the
+match but left the host FIFO walker at the pre-load session's
+position: it drained the restored ring from its stale offset,
+replaying consumed history or parsing payload data as methods
+-- poisoned shader state (fragment programs decompiled from
+the wrong bytes failed HLSL translation; black screen on the
+real GPU) or an unmapped-JUMP FIFO resync, depending on where
+the offset landed. Fork exports in cellGcmSys.c (SAVESTATE
+FIFO RESYNC; recomp/scripts/patch_fork_fifo_resync.py with
+the _scan/_put/_scan2/_scan3 follow-ons):
+ps3_gcm_fifo_savestate_hold() parks the walker across the
+restore; ps3_gcm_fifo_savestate_resync() moves it to the
+restored guest position -- the restored title context's
+current, scanned back to the saved session's last flip marker
+so the drain executes that flip in order -- publishes the
+control put (from the restored guest position) and get
+mirrors, clears the walker's CALL slot and pass state, and
+registers the saved session's last flip as queued-and-reached
+so its completion is delivered exactly once (a flip never
+reached waits forever; pre-fix loads resumed only because the
+stale replay crossed the marker). Glue in
+patch_main_savestate.py: hold with the pad/codec resyncs
+after total validation, resync right after the restore on
+every outcome. Host-private shadow state only; no
+guest-visible cache is invalidated (the #32 v2 lesson).
+Validated headlessly on deterministic Kreios leg-4 drives:
+the load resumes (byte-exact restore, pad admissions advance,
+state evolves) with the post-load fragment-translation
+failure class gone (5 in the same configuration before the
+fix); Jerry's mission-39 save loads with the resync line and
+no FIFO desync. Residual: the first frame after a load can
+still drop a draw whose program address was set before the
+saved session's tail and whose local-memory contents differ
+between sessions (1 in the Kreios validation run; 3 for the
+cross-mission mission-39 load); the picture on the real GPU
+is Jerry's check. Evidence: notes/051-save-states.md, round 4.

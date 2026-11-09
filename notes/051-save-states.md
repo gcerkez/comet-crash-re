@@ -531,3 +531,214 @@ scene you loaded from; (2) win the restored level and confirm
 the campaign map credits the mission and
 `NPUB30061-AUTO/SETTINGS.DAT` is rewritten; (3) music/SFX
 behave across the load.
+
+## Round 4 (2026-11-09): the real-user renderer failure — host FIFO walker position is not part of the restore
+
+**The report.** Jerry hand-tested the savestate build on the
+real GPU (mission 39, Campaign mode 0, Expansion content),
+three attempts:
+
+1. *In-place F9* (same session; the known-unsupported flow):
+   the guest FIFO stream desynced — `[FIFODUMP] +0
+   io=02189AB0 w=3CDD730D <-- bad word`, `[cellGcmSys] FIFO
+   resync (unmapped-JUMP) 0x02189AB0 -> put 0x021B649C` —
+   and the session froze moments later.
+2. *The documented flow* (F5-pause-save in mission 39, quit,
+   fresh launch, enter mission 39 by its own flow — Expansion
+   asset loads, no errors — pause, F9): `[LOAD] … 19125 pages
+   (+4 zero-filled), span 0x16600000, mission 39 mode 0
+   restored over state 14, stop-the-world 245 ms` — then,
+   immediately, `[RSX fp] sign-expand fetch opcode 25
+   unsupported on unit 15` and `[RSX vulkan] engine: fragment
+   translation failed: HLSL parse: ERROR: 0:18: '[' : array
+   index out of range '51'`. Presents kept advancing
+   (3360→4680+), total_surfs jumped 30→39 at the load,
+   guest_draws ~193/frame, pad input live. The sim resumed;
+   the screen was BLACK.
+3. *Same flow again* (`[LOAD]` 18,526 pages, 244 ms): no FP
+   error this time — instead the host FIFO parser desynced:
+   `FIFO JUMP to unmapped IO 0x1FFBA310`, `[FIFOSTEP]` words
+   at the ring base (io 0x00010000…) that are float payload
+   (3F800000, 3EFE147A) parsed as commands, then `FIFO resync
+   (unmapped-JUMP) 0x00010008 -> put 0x022D649C`, "resync
+   rescued 137 fence(s)" across ~0x22D5494 bytes.
+
+Both post-load signatures are the same divergence wearing
+two masks (below). Attempt 1's signature is recorded as
+**in-place blocker #2** — host FIFO parser position vs the
+restored guest FIFO state — after thread sync (#1): an
+in-place restore rewinds the guest ring but the host walker
+keeps its current-session position, so it parses the rewound
+stream from the wrong offset exactly as in attempt 3.
+
+**Prior art.** The FP-translation failure is load-specific.
+Grepping every driven log on the box: it fires immediately
+after `[LOAD]` in the round-3 battery (ss_t14b: '57','51',
+'55','57','51' back to back), after the round-1 live-copy
+loads (ss_t8b, ss_t10), and after Phase-1-style external
+restores (i2 ×3, i3 ×2; t16 shows the sign-expand warning
+next to a garbage `[NV3089] SKIPPED fmt=0x6C 12288x273`
+blit). No-load sessions never show it (the profiling agent's
+campaign/battle logs and every drive's session A: zero).
+Round 3 scored loads on admissions/census only, so the
+failures sat unread in logs whose tests "passed" — the
+pause backdrop those drives could not see was renderer-dead
+in the failing runs. Whether a given load fails is
+geometry-dependent (below), which is why other round-3
+loads were clean.
+
+**Headless repro.** Kreios leg-4 configuration (fresh boot,
+own-flow match, pause, load a same-mission save): pre-load
+and session-A counts zero; post-load **fp_fail=5** ('55' ×3
+visible in the tail) with the restore byte-exact (post-load
+bank sums == save-time sums) and the resume intact
+(admissions advanced, state back to 13). A control run with
+a benign walker geometry showed zero — the failure tracks
+the stale-region geometry, not the save. Jerry's mission-39
+save (preserved as `~/cc-savestates/slot1-mission39-repro
+.ccsave`) loaded into a Kreios session exercises the same
+path (the sim wedges cross-mission as before, but the
+renderer signatures are the observable).
+
+**Root cause.** The host FIFO walker (`cellGcmSys.c`,
+`gcm_rsx_process_fifo_unlocked`) tracks its read position in
+the host-private static `s_fifo_getoff` and chases the
+guest-published put from there. The guest half of that
+contract — the FIFO ring, the title's GCM context — is
+guest RAM and *is* restored; the host half is not, and
+nothing re-derived it. On resume the walker drains the
+restored ring starting from the pre-load session's offset:
+
+- If the stale offset lands on a saved-stream command
+  boundary, it replays already-consumed history — mostly
+  harmless state writes, which is why some loads were fine.
+- If it lands mid-payload, inline vertex/uniform data is
+  parsed as method headers: garbage methods poison the RSX
+  state the draw engine consumes (an absurd 12288×273 blit
+  in t16). The fragment-program address comes from host
+  register state the walker feeds, so the decompiler ends
+  up translating bytes that are not the guest's program;
+  the walk produces constant references past the end of the
+  `fp_constants[48]` cbuffer — `array index out of range
+  '51'/'55'/'57'`, varying with the garbage — HLSL parse
+  fails, the pipeline is dropped, every draw that needs it
+  is dropped with it: black screen, live sim.
+- If it runs into a word that decodes as a JUMP to unmapped
+  IO, the walker's own resync skips to the guest's current
+  put (attempts 1 and 3) — self-limiting for the parser,
+  but everything between was applied as state.
+
+Checked and exonerated: the FP memo (keyed on a
+content fingerprint of the ucode itself — a poisoned fetch
+is a different fingerprint, and the failing decompile is of
+genuinely wrong bytes, not a stale memo hit) and the
+persistent SPIR-V disk cache (a hit *skips* translation, so
+it cannot produce a parse error; the repro fired with a
+fresh cache directory).
+
+**Fix.** Walker hold + resync, no cache flush (the round-2/3
+lesson stands — guest-visible caches stay exactly as
+restored):
+
+- Fork, `cellGcmSys.c` (SAVESTATE FIFO RESYNC;
+  `patch_fork_fifo_resync.py` + `_scan/_put/_scan2/_scan3`
+  follow-ons): `ps3_gcm_fifo_savestate_hold()` sets a flag
+  the drain entry checks first, parking the walker;
+  `ps3_gcm_fifo_savestate_resync()` — under the FIFO lock —
+  moves `s_fifo_getoff` to the restored guest's position:
+  the IO offset of the restored title context's `current`
+  (read through `gCellGcmCurrentContext`, the derivation
+  the ring-recycle path uses; control-put fallback),
+  scanned back to the saved session's last flip marker (see
+  the flip half below). It clears the CALL return slot and
+  the park/semaphore pass state, republishes the drained EA
+  and the control get mirror at the walker position — and
+  the control *put* from the restored guest position, never
+  from the scanned-back walker start (an early version of
+  the scan published the marker position as put; the walker
+  chases put, believed itself caught up at the marker, and
+  never consumed the tail). It logs one line per load:
+  `[cellGcmSys] savestate load: FIFO walker 0x%08X -> 0x%08X
+  (restored guest position)`.
+- Glue (`patch_main_savestate.py` module; incremental
+  applier `patch_main_savestate_fifo.py`): the hold fires
+  with the pad/codec resyncs after total validation (closing
+  the window between SIGCONT and the resync where the
+  present thread could drain); the resync fires immediately
+  after the restore on every outcome.
+
+**The flip-completion half (found by the fix's own
+validation).** The plain teleport stopped the renderer
+errors — and stopped the resume: walker parked exactly at
+the restored position, restore byte-exact, but the guest
+never polled the pad again and presents froze. A gdb attach
+to the stalled session showed the main PPU thread
+usleep-polling a guest-RAM completion word and the libgcm
+event thread idle in `sys_event_queue_receive`: the guest
+was waiting on the completion of the last flip it had
+queued in the saved session. Flips complete when the
+walker *reaches* their FIFO marker (`s_fifo_flips_reached`
+vs `s_fifo_flips_queued`); the saved session's last marker
+sits behind the restored current, a walker teleported to
+current never reaches it, and this session's counters never
+counted it. The fork states the invariant itself, twice:
+the resync skip-scan counts skipped markers ("a flip
+marker skipped here will never be reached: count it, or
+every flip after it waits for the drain forever") and the
+no-IO-mapping write-off sets reached = queued ("do not let
+a flip wait on them"). Pre-fix loads resumed precisely
+because the stale walker *replayed* stream history and
+crossed that marker on its way — resume was bootstrapped
+by the same replay that poisoned the renderer. So the
+resync (a) starts the walker AT the marker — executing it
+is what notes the display buffer, raises the flip-pending
+flag the present loop waits on, and counts the reach — and
+(b) registers the saved flip in this session's books as
+queued AND reached (one flip completion owed), so the tick
+delivers exactly one completion and the counters stay
+consistent for every later flip; if the saved flip had in
+fact completed before the save, the pump's sequence stamp
+absorbs the extra completion when no flip is outstanding.
+Starting the walker a full frame earlier (at the previous
+marker) was also tried and was *worse* (2 poisoned
+pipelines vs 1): the register state a frame's draws inherit
+predates the frame, so replaying it executes more draws
+under mixed provenance, not fewer. This also re-reads
+round 3's flush lesson: the RSX flush plausibly wedged
+resume by disturbing this same completion bookkeeping, not
+(only) by dropping surfaces.
+
+**Validation (headless, scratch copy of the branch build,
+deterministic Kreios leg-4 drives).** Before the fix, the
+same drive: post-load fp_fail=5, resume only via the stale
+replay. After: **resume passes with the renderer error
+class gone** — restore byte-exact (post-load bank sums ==
+save-time sums), admissions advance on START, state back
+to 13 and evolving 55 s later, presents 37→55 — with
+fp_fail=1: a single boundary draw (LOCAL offset 0x65A080,
+a 16-word "program" whose bytes are float payload, index
+'49'), in the first frame after the load. Jerry's
+mission-39 save loaded into a Kreios session (cross-mission;
+the sim cannot truly resume there, but the renderer is the
+observable): walker resync line fires, presents advance,
+fp_fail=3 — the same boundary class at cross-mission scale.
+Noload control: zero signatures throughout.
+
+The residual is understood and bounded: a draw whose
+shader-program address was set by stream history before the
+saved session's tail, and whose local-memory contents
+differ between the two sessions, fetches the other
+session's bytes when its pipeline is first created after
+the load. It is confined to the first frame(s) after a
+load — the guest's own state stream re-covers every
+material as it plays — and it is *not* the reported bug:
+Jerry's screen stayed black because the stale walker
+poisoned state continuously, not for one frame. Closing
+the residual for good means carrying the RSX register/local
+state in the snapshot (a format change; v-next candidate),
+not another host-side heuristic. What headless still
+cannot prove is the picture: the real-GPU check is Jerry's
+— reload the mission-39 save by the documented flow and
+confirm the scene renders (and the pause backdrop, manual
+check 1 from round 3). Expect at most a one-frame glitch at
+the load instant, not a black screen.
