@@ -439,3 +439,39 @@ store only; +0x5C/+0x5D are flag bytes). With the cheat on, the
 aggregate always equals the pinned stockpiles; on disable, the
 last tick leaves it equal to the real total and the game's own
 bookkeeping tracks from there.
+
+## #27 - Fixed -6 dB mix headroom (AUDIO_HEADROOM)
+
+The mixer summed guest ports at full scale and hard-clipped the
+result, so stacked sounds slammed into the ceiling. Following
+iopenmohaa-ps3's hardware-validated PS3A_MIX_HEADROOM,
+audio_mix_one_block now scales the finished mix by a master gain
+before the AUDIO_MIX_NORM / clip stage. The gain comes from
+AUDIO_HEADROOM, default 0.5 (-6 dB); 1.0 skips the multiply and
+the mix is bit-exact the old way. Fork d3f0347a. A/B proof on
+paired driven captures: the title-to-menu beep peaked at 0.0757
+(control) vs 0.0379 with headroom - the same event at exactly
+half amplitude.
+
+## #28 - Mixer concealment stack (AUDIO_CONCEAL, default off)
+
+When the guest audio producer falls behind under load, the mixer
+used to play the unwritten ring block as a silent hole - heard as
+chopping and crackle. Ported from whompay/inFAMOUSreborn's
+vendored cellAudio.c (same runtime lineage; their issue #60 is
+the same complaint), adapted to this fork's POSIX mixer and gated
+behind AUDIO_CONCEAL=1 (default OFF pending a heavy-session
+listening verdict): elastic consumption (a bounded wait,
+AUDIO_ELASTIC_US default 6000 us, for a late block from a
+recently-playing port when the device queue has slack); sentinel
+marking of consumed blocks (-0.0f) so unwritten blocks are
+distinguishable from written silence, with stall bounding
+(AUDIO_STALL_MAX) and a self-protection give-up that restores
+plain behaviour if holes persist pathologically; and PLC -
+waveform-matched (WSOLA) repeat concealment of missing blocks
+with crossfades, AUDIO_PLC_MODE default 3. Event counters print
+under AUDIO_RATE=1. AUDIO_STRETCH was deliberately not ported:
+it rides a host-FIFO design that conflicts with this fork's
+deadline pacing + backlog drop/resync (885b5bab). Fork dd777aee.
+Driven verification: machinery live in the stats lines, zero
+false triggers on a quiet menu workload.

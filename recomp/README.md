@@ -160,6 +160,9 @@ The launcher script sets optimal defaults, but you can customize runtime behavio
 | `PAD_POLL_INTERVAL_MS` | `16` | Fresh pad-report cadence. `16` matches the hardware contract; the old `4` made pause menus auto-repeat ~4x too fast. |
 | `AUDIO_WAV` | unset | When set to a file path, the final audio mix is recorded there (raw float32 stereo, 48 kHz) — useful for audio bug reports. Example: `AUDIO_WAV=/tmp/mix.wav ./run.sh /path/to/EBOOT.ELF`. |
 | `AUDIO_MIX_NORM` | `0` | Set to `1` to scale would-clip mixed blocks to peak instead of hard-clipping, when many sounds stack at once. Opt-in pending wider listening tests. |
+| `AUDIO_HEADROOM` | `0.5` | Fixed master-gain headroom applied to the finished mix before clipping (-6 dB at the default), so overlapping sounds stop slamming into the clip ceiling. `1.0` restores the old full-scale mix. |
+| `AUDIO_CONCEAL` | `0` | Set to `1` to enable the mixer concealment stack: a bounded wait for late audio blocks, and waveform-matched concealment of blocks that never arrive, instead of silent holes (sub-knobs `AUDIO_ELASTIC_US`, `AUDIO_PLC_MODE`). |
+
 | `AUDIO_PEAK` / `AUDIO_RATE` | unset | Audio diagnostics: when set, the cellAudio mixer periodically logs the mixed blocks' peak amplitude and the silent-block percentage. |
 
 ---
