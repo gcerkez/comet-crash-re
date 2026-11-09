@@ -11,11 +11,12 @@ glue (~/tools/cc-recomp/main.cpp):
      (F5/F9), and a debug trigger file ("save"/"load" in
      saves/trigger) reaching the same code path for scripted drives.
      v2: the restore's page copy runs stop-the-world -- after total
-     validation and after the in-process resyncs (RSX cache flush,
-     pad resync, codec stream-table reset) have fired, the glue
-     forks a helper, SIGSTOPs the whole process, and the helper
-     writes the snapshot through /proc/self/mem while every game
-     thread is frozen, then SIGCONTs the parent (notes 051).
+     validation and after the pad/codec host resyncs have fired,
+     the glue forks a helper, SIGSTOPs the whole process, and the
+     helper writes the snapshot through /proc/self/mem while every
+     game thread is frozen, then SIGCONTs the parent (notes 051).
+     The round 1/2 RSX guest-cache flush is deliberately not
+     fired: it wedges cross-process loads (notes 051, v2).
   3. A trigger poll call inside comet_crash_camera_tick, next to the
      cheats tick.
 
@@ -70,25 +71,29 @@ MODULE = r'''
  * SPURS bookkeeping advancing -- and the restored match wedged
  * or tore itself down every time; Phase 1's external
  * prototype, which SIGSTOPped around both capture and restore,
- * resumed. The resyncs (host caches derived from guest memory,
- * dropped through the backend's ps3_rsx_flush_guest_caches --
- * declared weak: absent on other backends, where the engine's
- * content hashes still catch texture changes on their own --
- * plus the pad backend's admission state,
- * ps3_pad_resync_savestate, and the host MP3 codec's stream
- * table, ps3_spu_mp3_reset_streams) fire BEFORE the stop
- * because they touch host-side bookkeeping only: at the pause
- * boundary the guest's match state is provably static (Phase 1
- * measured identical samples 6 s apart, entity banks
+ * resumed. Two of the resyncs fire BEFORE the stop -- the
+ * pad backend's admission resync (ps3_pad_resync_savestate)
+ * and the host MP3 codec's stream-table reset
+ * (ps3_spu_mp3_reset_streams), both declared weak -- because
+ * they touch host-side bookkeeping only: at the pause
+ * boundary the guest's match state is provably static (Phase
+ * 1 measured identical samples 6 s apart, entity banks
  * included), so re-syncing them while the world still runs
  * cannot race guest match state, and it keeps the stopped
  * window down to exactly the page copy -- the only part that
- * must be atomic. The RSX flush additionally submits and idles
- * the device, so the GPU is quiet when the stop lands. The
- * mixer itself is not reset; it re-reads its guest ring state
+ * must be atomic. The round 1/2 RSX guest-cache flush
+ * (ps3_rsx_flush_guest_caches) is deliberately NOT fired:
+ * with it in the path, a cross-process load restored
+ * byte-exact but the guest never polled the pad again,
+ * while the identical load without it resumed and played
+ * (notes 051, v2 addendum, drives 14-17). The flush is the
+ * only one of the three whose effects reach guest-visible
+ * machinery -- the RSX FIFO and the surface bookkeeping
+ * span the guest/host boundary, and the snapshot already
+ * carries the guest half of that state. The mixer itself
+ * is not reset either; it re-reads its guest ring state
  * every block.
  * -----------------------------------------------------------------------*/
-extern "C" void ps3_rsx_flush_guest_caches(void) __attribute__((weak));
 extern "C" void ps3_pad_resync_savestate(void) __attribute__((weak));
 extern "C" void ps3_spu_mp3_reset_streams(void) __attribute__((weak));
 
@@ -514,17 +519,11 @@ int ss_do_load(void)
         return 0;
     }
     const ULONGLONG t0 = GetTickCount64();
-    /* SAVESTATE PATCH (v2 resync): the RSX guest-cache flush, the
-     * pad backend's admission resync and the MP3 codec's
-     * stream-table reset (Phase 1's host-state list, notes 051)
-     * fire BEFORE the stop-the-world copy. They touch host-side
-     * bookkeeping only, and at the pause boundary the guest's
-     * match state is static, so firing them while the world still
-     * runs cannot race the snapshot; it also keeps the stopped
-     * window down to exactly the page copy. The RSX flush
-     * additionally submits and idles the device, so the GPU is
-     * quiet when the stop lands. */
-    if (ps3_rsx_flush_guest_caches) ps3_rsx_flush_guest_caches();
+    /* SAVESTATE PATCH (v2 resync): the pad backend's admission
+     * resync and the MP3 codec's stream-table reset fire BEFORE
+     * the stop-the-world copy (rationale in the banner). The RSX
+     * guest-cache flush is deliberately not fired -- see the
+     * banner for the drive evidence. */
     if (ps3_pad_resync_savestate) ps3_pad_resync_savestate();
     if (ps3_spu_mp3_reset_streams) ps3_spu_mp3_reset_streams();
     /* Bitmap of the pages the save owns; the restore zero-fills
