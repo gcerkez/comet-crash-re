@@ -10,6 +10,12 @@ glue (~/tools/cc-recomp/main.cpp):
      the Vulkan backend's weak hooks ps3_host_savestate_save/_load
      (F5/F9), and a debug trigger file ("save"/"load" in
      saves/trigger) reaching the same code path for scripted drives.
+     v2: the restore's page copy runs stop-the-world -- after total
+     validation and after the in-process resyncs (RSX cache flush,
+     pad resync, codec stream-table reset) have fired, the glue
+     forks a helper, SIGSTOPs the whole process, and the helper
+     writes the snapshot through /proc/self/mem while every game
+     thread is frozen, then SIGCONTs the parent (notes 051).
   3. A trigger poll call inside comet_crash_camera_tick, next to the
      cheats tick.
 
@@ -44,25 +50,62 @@ MODULE = r'''
  * in-RAM allocator state matches. v1, on muse/save-states, expected
  * to have sharp edges; notes/051-save-states.md keeps the list.
  *
- * Restore semantics: the span the save covered is zeroed, then the
- * saved pages are written back -- progress after the save point is
- * rolled back exactly, including campaign state: the mission id and
- * mode word are part of the snapshot (they live in the object at
- * 0x30E600), so a win after a load is a win on the level the save
- * was taken in, credited by the game's own progression code.
- * After the copy, host caches derived from guest memory are dropped
- * through the backend's ps3_rsx_flush_guest_caches (declared weak:
- * absent on other backends, where the engine's content hashes still
- * catch texture changes on their own). On load, two host
- * subsystems are re-synced per the Phase-1 findings (notes 051):
- * the pad backend's admission state (ps3_pad_resync_savestate)
- * and the host MP3 codec's stream table
- * (ps3_spu_mp3_reset_streams). The mixer itself is not reset;
- * it re-reads its guest ring state every block.
+ * Restore semantics: pages the save owns are written back, and
+ * pages that are nonzero in the current span but absent from the
+ * save are zero-filled first (the Phase-1 reconciliation) --
+ * progress after the save point is rolled back exactly,
+ * including campaign state: the mission id and mode word are
+ * part of the snapshot (they live in the object at 0x30E600),
+ * so a win after a load is a win on the level the save was
+ * taken in, credited by the game's own progression code.
+ *
+ * Restore atomicity (v2): the page copy runs stop-the-world.
+ * After the file has been totally validated and the host resyncs
+ * below have fired, the glue forks a helper and SIGSTOPs the
+ * whole process; the helper writes the snapshot through
+ * /proc/self/mem while every game thread is frozen, then
+ * SIGCONTs the parent. Rounds 1-2 copied ~115 MB with every
+ * thread live -- the RSX thread draining a FIFO out of the
+ * memory being swapped, the audio task writing its rings,
+ * SPURS bookkeeping advancing -- and the restored match wedged
+ * or tore itself down every time; Phase 1's external
+ * prototype, which SIGSTOPped around both capture and restore,
+ * resumed. The resyncs (host caches derived from guest memory,
+ * dropped through the backend's ps3_rsx_flush_guest_caches --
+ * declared weak: absent on other backends, where the engine's
+ * content hashes still catch texture changes on their own --
+ * plus the pad backend's admission state,
+ * ps3_pad_resync_savestate, and the host MP3 codec's stream
+ * table, ps3_spu_mp3_reset_streams) fire BEFORE the stop
+ * because they touch host-side bookkeeping only: at the pause
+ * boundary the guest's match state is provably static (Phase 1
+ * measured identical samples 6 s apart, entity banks
+ * included), so re-syncing them while the world still runs
+ * cannot race guest match state, and it keeps the stopped
+ * window down to exactly the page copy -- the only part that
+ * must be atomic. The RSX flush additionally submits and idles
+ * the device, so the GPU is quiet when the stop lands. The
+ * mixer itself is not reset; it re-reads its guest ring state
+ * every block.
  * -----------------------------------------------------------------------*/
 extern "C" void ps3_rsx_flush_guest_caches(void) __attribute__((weak));
 extern "C" void ps3_pad_resync_savestate(void) __attribute__((weak));
 extern "C" void ps3_spu_mp3_reset_streams(void) __attribute__((weak));
+
+#ifndef _WIN32
+/* SAVESTATE PATCH (v2): POSIX surface for the stop-the-world
+ * restore (fork, SIGSTOP/SIGCONT, /proc mem, shared status page).
+ * Inside the forked child only raw-syscall wrappers run: no
+ * stdio, no malloc -- everything it touches is allocated before
+ * the fork. */
+#include <unistd.h>
+#include <signal.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#endif
 
 namespace {
 
@@ -212,6 +255,203 @@ int ss_do_save(void)
     return 1;
 }
 
+#ifndef _WIN32
+/* SAVESTATE PATCH (v2): the stop-the-world restore machinery.
+ *
+ * The parent opens /proc/self/mem and maps one shared status
+ * page BEFORE forking. The child inherits both (the memfd stays
+ * bound to this process's address space; the status page is
+ * MAP_SHARED, so the parent can read the outcome the moment it
+ * resumes). The child waits until /proc/<ppid>/stat reports the
+ * parent stopped, so no page is written before every parent
+ * thread is frozen; then it runs the same restore the live copy
+ * did -- zero-fill reconciliation first, then every saved page
+ * -- through the memfd, records progress in the status page,
+ * SIGCONTs the parent, and _exits. Exit codes: 0 = restored;
+ * 2 = failed before any write (parent memory untouched);
+ * 3 = failed mid-write (parent memory may be mixed). The
+ * status page is authoritative; the exit code is the
+ * cross-check for when waitpid works. */
+struct SsStopStatus {
+    volatile uint32_t phase;         /* 1 waiting, 2 zeroing, 3 writing, 4 done */
+    volatile uint32_t pages_written;
+    volatile uint32_t pages_zeroed;
+    volatile int32_t  error;         /* errno of the failing op, 0 = none */
+};
+
+uint8_t s_ss_zero_page[kSsPage];   /* BSS is zero: a zero page */
+uint8_t s_ss_scratch[kSsPage];     /* child-only read scratch */
+
+int ss_io_all(int fd, uint8_t* buf, off_t off, bool write_op)
+{
+    size_t done = 0;
+    while (done < kSsPage) {
+        ssize_t n = write_op
+            ? pwrite(fd, buf + done, kSsPage - done, off + (off_t)done)
+            : pread(fd, buf + done, kSsPage - done, off + (off_t)done);
+        if (n < 0) { if (errno == EINTR) continue; return errno; }
+        if (n == 0) return EIO;
+        done += (size_t)n;
+    }
+    return 0;
+}
+
+/* Poll /proc/<parent>/stat until the parent's state reads T
+ * (stopped). Bounded (~3 s); returns 0 or errno. The path is
+ * built by hand: no stdio in the child. */
+int ss_wait_stopped(pid_t parent)
+{
+    char procpath[64];
+    {
+        char rev[16];
+        int ri = 0;
+        unsigned v = (unsigned)parent;
+        if (!v) rev[ri++] = '0';
+        while (v) { rev[ri++] = (char)('0' + (v % 10)); v /= 10; }
+        const char* pre = "/proc/";
+        const char* suf = "/stat";
+        int o = 0;
+        while (*pre) procpath[o++] = *pre++;
+        while (ri > 0) procpath[o++] = rev[--ri];
+        while (*suf) procpath[o++] = *suf++;
+        procpath[o] = 0;
+    }
+    for (int i = 0; i < 3000; i++) {
+        int fd = open(procpath, O_RDONLY);
+        if (fd < 0) return errno;            /* parent vanished */
+        char buf[512];
+        ssize_t n = read(fd, buf, sizeof buf - 1);
+        close(fd);
+        if (n > 0) {
+            buf[n] = 0;
+            const char* rp = strrchr(buf, ')');
+            if (rp && rp[1] == ' ' && (rp[2] == 'T' || rp[2] == 't'))
+                return 0;
+        }
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 1000000;                /* 1 ms */
+        nanosleep(&ts, NULL);
+    }
+    return ETIMEDOUT;
+}
+
+int ss_child_restore(int memfd, pid_t parent, const uint8_t* blob,
+                     const SsHeader* h, const uint8_t* in_save,
+                     SsStopStatus* status)
+{
+    int wrote = 0;
+    if (status) status->phase = 1;
+    int err = ss_wait_stopped(parent);
+    if (!err) {
+        const uint64_t span_pages = h->restore_span / kSsPage;
+        if (status) status->phase = 2;
+        for (uint64_t pg = 0; pg < span_pages && !err; pg++) {
+            if (in_save[pg >> 3] & (1u << (pg & 7))) continue;
+            off_t off = (off_t)((uintptr_t)vm_base + (size_t)pg * kSsPage);
+            err = ss_io_all(memfd, s_ss_scratch, off, false);
+            if (!err && ss_page_nonzero(s_ss_scratch)) {
+                err = ss_io_all(memfd, s_ss_zero_page, off, true);
+                if (!err) {
+                    wrote = 1;
+                    if (status) status->pages_zeroed = status->pages_zeroed + 1;
+                }
+            }
+        }
+        if (status) status->phase = 3;
+        for (uint64_t i = 0; i < h->page_count && !err; i++) {
+            const uint8_t* rec = blob + i * (sizeof(uint32_t) + kSsPage);
+            uint32_t addr;
+            memcpy(&addr, rec, sizeof addr);
+            off_t off = (off_t)((uintptr_t)vm_base + addr);
+            err = ss_io_all(memfd, (uint8_t*)rec + sizeof(uint32_t),
+                            off, true);
+            if (!err) {
+                wrote = 1;
+                if (status) status->pages_written = (uint32_t)(i + 1);
+            }
+        }
+    }
+    if (status) { status->error = err; status->phase = 4; }
+    kill(parent, SIGCONT);      /* on EVERY path: never leave it stopped */
+    return err ? (wrote ? 3 : 2) : 0;
+}
+
+/* Returns 0 = restored, 1 = refused/failed before any write
+ * (guest memory untouched, session unharmed), 2 = failed
+ * mid-write (guest memory may be mixed; session corrupt).
+ * Logs its own [LOAD] outcome line. */
+int ss_restore_stop_the_world(const char* path, const uint8_t* blob,
+                              const SsHeader* h,
+                              const uint8_t* in_save, ULONGLONG t0)
+{
+    int memfd = open("/proc/self/mem", O_RDWR);
+    if (memfd < 0) {
+        fprintf(stderr, "[LOAD] refused: cannot open /proc/self/mem "
+                "(%s); guest memory untouched\n", strerror(errno));
+        return 1;
+    }
+    SsStopStatus* status = (SsStopStatus*)mmap(NULL, 4096,
+        PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (status == MAP_FAILED) {
+        fprintf(stderr, "[LOAD] refused: cannot map the restore status "
+                "page (%s); guest memory untouched\n", strerror(errno));
+        close(memfd);
+        return 1;
+    }
+    memset((void*)status, 0, sizeof *status);
+    const pid_t self = getpid();
+    const ULONGLONG tstop = GetTickCount64();
+    const pid_t pid = fork();
+    if (pid == 0)
+        _exit(ss_child_restore(memfd, self, blob, h, in_save, status));
+    if (pid < 0) {
+        fprintf(stderr, "[LOAD] refused: fork failed (%s); guest memory "
+                "untouched\n", strerror(errno));
+        munmap((void*)status, 4096);
+        close(memfd);
+        return 1;
+    }
+    raise(SIGSTOP);
+    /* Frozen here until the child finishes the copy and SIGCONTs
+     * us. The child published the outcome in the status page
+     * before the SIGCONT, so it is already readable. */
+    int wst = 0;
+    const pid_t w = waitpid(pid, &wst, 0);
+    const ULONGLONG stop_ms = GetTickCount64() - tstop;
+    const int child_err = status->error;
+    const uint32_t wrote_pages = status->pages_written;
+    const uint32_t zeroed_pages = status->pages_zeroed;
+    const int child_rc = (w > 0 && WIFEXITED(wst)) ? WEXITSTATUS(wst) : -1;
+    munmap((void*)status, 4096);
+    close(memfd);
+    if (!child_err && wrote_pages == h->page_count) {
+        const ULONGLONG ms = GetTickCount64() - t0;
+        fprintf(stderr, "[LOAD] %s: %llu pages (+%u zero-filled), span "
+                "0x%llX, mission %u mode %u (saved in state %u) restored "
+                "over state 14, stop-the-world %llu ms, total %llu ms\n",
+                path, (unsigned long long)h->page_count, zeroed_pages,
+                (unsigned long long)h->restore_span, h->mission_id,
+                h->mode, h->state, (unsigned long long)stop_ms,
+                (unsigned long long)ms);
+        return 0;
+    }
+    if (!wrote_pages && !zeroed_pages) {
+        fprintf(stderr, "[LOAD] FAILED before any page was written "
+                "(%s, child rc %d); guest memory untouched, session "
+                "unharmed\n",
+                child_err ? strerror(child_err) : "no errno", child_rc);
+        return 1;
+    }
+    fprintf(stderr, "[LOAD] FAILED mid-restore after %u pages (%s, "
+            "child rc %d); guest memory may be mixed -- consider this "
+            "session corrupt and restart the game\n",
+            wrote_pages + zeroed_pages,
+            child_err ? strerror(child_err) : "no errno", child_rc);
+    return 2;
+}
+#endif /* !_WIN32 */
+
 int ss_do_load(void)
 {
     if (!vm_base) return 0;
@@ -274,37 +514,48 @@ int ss_do_load(void)
         return 0;
     }
     const ULONGLONG t0 = GetTickCount64();
+    /* SAVESTATE PATCH (v2 resync): the RSX guest-cache flush, the
+     * pad backend's admission resync and the MP3 codec's
+     * stream-table reset (Phase 1's host-state list, notes 051)
+     * fire BEFORE the stop-the-world copy. They touch host-side
+     * bookkeeping only, and at the pause boundary the guest's
+     * match state is static, so firing them while the world still
+     * runs cannot race the snapshot; it also keeps the stopped
+     * window down to exactly the page copy. The RSX flush
+     * additionally submits and idles the device, so the GPU is
+     * quiet when the stop lands. */
     if (ps3_rsx_flush_guest_caches) ps3_rsx_flush_guest_caches();
-    /* SAVESTATE PATCH (reconcile): zero only pages that are nonzero
-     * in the CURRENT span but absent from the save -- the Phase-1
-     * prototype's reconciliation (notes 051). A blanket memset of
-     * the span also wipes high pages the recorded span happens to
-     * cover but whose current contents the snapshot never owned
-     * (the span is set by the highest saved page, e.g. the cheats
-     * label page at 0x21010000), and cross-instance loads then
-     * deterministically collapsed the target match (drives 8/9 in
-     * notes 051). */
-    {
-        const uint64_t npages = h.restore_span / kSsPage;
-        uint8_t* in_save =
-            (uint8_t*)calloc((size_t)((npages + 7) / 8), 1);
-        if (in_save) {
-            for (uint64_t i = 0; i < h.page_count; i++) {
-                uint32_t addr;
-                memcpy(&addr, blob + i * (sizeof(uint32_t) + kSsPage),
-                       sizeof addr);
-                in_save[(addr / kSsPage) >> 3] |=
-                    (uint8_t)(1u << ((addr / kSsPage) & 7));
-            }
-            for (uint64_t pg = 0; pg < npages; pg++) {
-                if (in_save[pg >> 3] & (1u << (pg & 7))) continue;
-                uint8_t* p = vm_base + (size_t)pg * kSsPage;
-                if (ss_page_nonzero(p)) memset(p, 0, kSsPage);
-            }
-            free(in_save);
-        } else {
-            memset(vm_base, 0, (size_t)h.restore_span);
-        }
+    if (ps3_pad_resync_savestate) ps3_pad_resync_savestate();
+    if (ps3_spu_mp3_reset_streams) ps3_spu_mp3_reset_streams();
+    /* Bitmap of the pages the save owns; the restore zero-fills
+     * pages that are nonzero in the current span but absent from
+     * the save (the Phase-1 reconciliation). */
+    const uint64_t span_pages = h.restore_span / kSsPage;
+    uint8_t* in_save = (uint8_t*)calloc((size_t)((span_pages + 7) / 8), 1);
+    if (!in_save) {
+        free(blob);
+        fprintf(stderr, "[LOAD] refused: out of memory building the "
+                "restore map; guest memory untouched\n");
+        return 0;
+    }
+    for (uint64_t i = 0; i < h.page_count; i++) {
+        uint32_t addr;
+        memcpy(&addr, blob + i * (sizeof(uint32_t) + kSsPage), sizeof addr);
+        in_save[(addr / kSsPage) >> 3] |=
+            (uint8_t)(1u << ((addr / kSsPage) & 7));
+    }
+#ifndef _WIN32
+    const int rc = ss_restore_stop_the_world(path, blob, &h, in_save, t0);
+    free(in_save);
+    free(blob);
+    return rc == 0 ? 1 : 0;
+#else
+    /* Windows has no stop-the-world equivalent in v2; keep the
+     * round-1 live copy there (reconcile, then copy back). */
+    for (uint64_t pg = 0; pg < span_pages; pg++) {
+        if (in_save[pg >> 3] & (1u << (pg & 7))) continue;
+        uint8_t* p = vm_base + (size_t)pg * kSsPage;
+        if (ss_page_nonzero(p)) memset(p, 0, kSsPage);
     }
     for (uint64_t i = 0; i < h.page_count; i++) {
         const uint8_t* rec = blob + i * (sizeof(uint32_t) + kSsPage);
@@ -312,13 +563,8 @@ int ss_do_load(void)
         memcpy(&addr, rec, sizeof addr);
         memcpy(vm_base + addr, rec + sizeof addr, kSsPage);
     }
+    free(in_save);
     free(blob);
-    /* SAVESTATE PATCH (resync): Phase 1 (notes 051) -- the pad
-     * backend's admission state and the MP3 codec's stream table
-     * belong to the current timeline; reset both so the restored
-     * match is driven by fresh host state. */
-    if (ps3_pad_resync_savestate) ps3_pad_resync_savestate();
-    if (ps3_spu_mp3_reset_streams) ps3_spu_mp3_reset_streams();
     const ULONGLONG ms = GetTickCount64() - t0;
     fprintf(stderr, "[LOAD] %s: %llu pages, span 0x%llX, mission %u mode %u "
             "(saved in state %u) restored over state %u, %llu ms\n",
@@ -326,6 +572,7 @@ int ss_do_load(void)
             (unsigned long long)h.restore_span, h.mission_id, h.mode,
             h.state, state, (unsigned long long)ms);
     return 1;
+#endif
 }
 
 /* Debug trigger for scripted drives: a file named "trigger" in the
@@ -381,7 +628,7 @@ def main() -> int:
         print("edit 1 (includes): already in")
 
     # ---- edit 2: the module, before the camera tick ----
-    if "comet_savestate_poll_trigger" not in t:
+    if "int ss_do_load(void)" not in t:
         anchor = "static void comet_crash_camera_tick(void)"
         repl = MODULE.lstrip("\n") + "\n" + anchor
         t = replace_once(t, anchor, repl, "module insertion")
