@@ -208,6 +208,26 @@ very heavy unit counts is the game's entity-simulation SPU job,
 which is still the lifted code — see `notes/RECONSTRUCTION-050.md`
 for the analysis and what a further override would require.
 
+## Save states (experimental)
+
+On the `muse/save-states` branch the recomp can snapshot a
+match: pause the game and press **F5** to write
+`~/tools/cc-recomp/saves/slot1.ccsave` (~110 MB, uncompressed);
+**F9** loads it back (in a match, at the pause, or at the title
+screen). Restores are byte-exact - the saved mission, mode,
+units and resources come back precisely, and the mission id in
+the snapshot is what the game's own progression code would
+credit on a clear.
+
+**Current limit, stated plainly:** after an in-game load the
+restored match does not resume - the simulation stays frozen,
+or the game leaves the match - because the restore cannot yet
+stop and re-sync the runtime's own threads the way the
+prototype's external tool could. The design, the test evidence
+(including the one flow that does resume today) and the known
+issues are in `notes/051-save-states.md`. Treat F5/F9 as an
+experimental snapshot mechanism, not a finished save feature.
+
 ## Known issues
 
 - **Audio character**: music and SFX play through the native host

@@ -515,3 +515,21 @@ AUDIO_SDL_FRAMES (clamped 256..4096); our mixer's deadline
 pacing and drop/resync stay in charge of timing. The boot log
 confirms the grant ("SDL device: freq=48000 ch=2
 samples=1024"). Fork d7430289.
+
+## #32 - Save states (experimental, branch muse/save-states)
+
+F5 saves the current match to ~/tools/cc-recomp/saves/slot1.ccsave,
+F9 loads it. Glue module applied by
+recomp/scripts/patch_main_savestate.py; fork a9ec9227 (backend
+hooks + ps3_rsx_flush_guest_caches) and 18ded31d (engine cache
+invalidate). Sparse guest-RAM snapshot: header (magic CCSV0001,
+mission id, mode, state, timestamp) + nonzero 4 KiB pages over
+guest [0, 0x20000000); load validates the whole file before
+touching memory, flushes RSX caches, reconciles and copies pages
+back. Save is pause-only (state 14; state-13 captures tear).
+Restores are byte-exact, same-session and cross-boot - but
+resumption is not yet sound in-glue: in-place and title loads
+leave the sim frozen, cross-instance loads into a paused match
+collapse it, while the external SIGSTOP prototype's leg-4 flow
+(same format) resumes and plays. Full evidence and the
+stop-the-world analysis: notes/051-save-states.md.

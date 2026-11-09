@@ -206,3 +206,149 @@ save/load/sample tool; xsample.py the extended sampler; the
 rest are the driven-session harness). The test save itself
 (`~/cc-savestates/test1.ccsave` on the desktop) is **not**
 committed — it is 114 MB of guest RAM.
+
+## Phase 2 — in-glue implementation (F5/F9) and the full battery
+
+Phase 1 (above) proved the format with an external /proc tool and
+mapped exactly where restores are sound. Phase 2 builds the
+product path the verdict calls for — the runtime taking its own
+snapshot — and re-tests every leg from inside the glue. The two
+phases agree wherever they overlap. The leg-4 flow through the
+glue is the one place they differ, and the difference is
+instructive: see the drives 8–11 result below.
+
+### What was built
+
+- **Fork** (`muse/save-states`, from d7430289):
+  `18ded31d` — `rsx_draw_engine_invalidate_guest_caches()` in the
+  draw engine (evict every texture/surface/depth through the
+  normal eviction callbacks). `a9ec9227` — the Vulkan backend's
+  SDL pump calls new weak hooks `ps3_host_savestate_save()` /
+  `ps3_host_savestate_load()` on **F5/F9** (the
+  `ps3_host_quit_needs_confirm` pattern), and exports
+  `ps3_rsx_flush_guest_caches()` (submit + device idle, drop
+  cached framebuffers, engine invalidate, unbind fallback decoded
+  units). This is the RSX surface-cache duty from Phase 1's
+  resync list, so a restored pause re-renders its backdrop from
+  restored RAM instead of compositing the later timeline's
+  surface (Phase 1 leg 3's stale backdrop).
+- **Glue** (`recomp/scripts/patch_main_savestate.py` applied to
+  the workspace `main.cpp`): the capture/restore module — sparse
+  nonzero-page snapshot of guest [0, 0x40000000) (mincore-bounded),
+  header `CCSV0001` v1 {mission id, mode word, state word, unix
+  time, page count, restore span}, total file validation before
+  any guest byte changes (magic/version/exact size/record
+  alignment+span), zero-the-span then copy-back restore, cache
+  flush via the backend hook — plus a debug trigger file
+  (`saves/trigger`) reaching the identical code path for scripted
+  drives. Save dir `~/tools/cc-recomp/saves/` (env
+  `CC_SAVESTATE_DIR`), file `slot1.ccsave` (~110–119 MB, save
+  105–1,400 ms under load, load 41–276 ms).
+- **Gates**: save **pause-only (state 14)** — gate v2, tightened
+  after the state-13 tearing result below (Phase 1's "refuse
+  outside pause" recommendation, confirmed the hard way). Load:
+  front-end (this title idles in state **11**, measured — the
+  first gate cut used <=6 and refused title loads), 13 or 14;
+  state 12 and 7–10 refused. All refusals log one `[SAVE]`/`[LOAD]`
+  line and touch nothing; the no-file and truncated-file load
+  refusals were exercised at the title with the process unharmed.
+- Build: `~/tools/cc-recomp/build-savestate` + launcher
+  `run-savestate.sh` (the default `run.sh` is untouched).
+
+### Results (drives 1–8, 2026-11-08; observables = per-slot
+Thorium/life/stockpiles, ship record via bank+registry, per-bank
+entity census + full byte-sum over both 256 KB banks)
+
+- **Restore fidelity is byte-exact in every leg.** Pause save in
+  Kreios L1 (29,118 pages, span 0x21011000, mission 1, mode 0):
+  observables at the pause — Thorium 1000.0, life 25, stockpiles
+  60x8, ship idx 89 hp 1000.0, bank byte-sums
+  426499962924614703 / 7443478715371084856 — are reproduced
+  *identically* after a same-session load over a diverged world
+  and after a **cross-boot** load into a fresh process.
+- **In-place / later-timeline loads wedge the sim** (Phase 1
+  leg 3, confirmed in-glue): after a same-session load the state
+  word is right and frames present, but two observable sets 30 s
+  apart are bit-identical; inputs do not move the restored
+  pause. Host state had advanced past the snapshot.
+- **Title loads wedge the sim** (Phase 1 leg 5, confirmed
+  in-glue): cross-boot load at state 11 restores state 14 and
+  the exact world, which then never simulates.
+- **State-13 saves tear**: a gameplay save loaded cross-boot
+  killed the fresh process via the guest's own heap assertion
+  (`mspace_malloc ... chunksize(p) == small_index2size(idx)`,
+  then `sys_process_exit(1)`). Pause captures never showed
+  this. Hence gate v2.
+- **The leg-4 flow through the glue collapses the target match
+  (drives 8–11)**. Four runs of the exact leg-4 recipe — fresh
+  process, Kreios L1 entered by its own flow, paused, load —
+  all ended the same deterministic way: the restore completes
+  ([LOAD] 29,101–29,115 pages, 66–202 ms), the state word reads
+  14, but the entity banks are already zeroed in the first
+  post-load sample and the log shows an orderly match teardown
+  (guest thread exits, boot level 152 reloading, state settling
+  at 0, mission word reset). No crash, no resume. Three restore
+  variants were tried against the identical flow: blanket
+  memset of the span (drives 8/9), Phase-1-style reconciliation
+  — zero only pages nonzero in the target but absent from the
+  save (drive 10; also cut load time to 85 ms), and the Phase-1
+  span cap of 512 MB on both capture and restore (drive 11,
+  span 0x19200000). **All three refuted as causes** — the
+  collapse is identical every time. The one structural
+  difference that remains standing between Phase 1's working
+  leg 4 and this one is **quiescence**: Phase 1 captured and
+  restored with the whole process SIGSTOPped, while the in-glue
+  restore copies ~115 MB over 66–200 ms with every thread live
+  — the RSX thread draining a FIFO out of the memory being
+  swapped, the audio task writing its rings, flip labels
+  advancing — and the capture likewise scans a live (if
+  pause-frozen) process whose host threads keep writing. The
+  restored guest state therefore contains host-timeline
+  artifacts (label/cursor values from the saving process's
+  runtime) that the target's match-integrity logic rejects
+  immediately. Making the in-glue restore sound needs a
+  stop-the-world step — e.g. a boot-forked helper that
+  SIGSTOPs the game and writes /proc/<pid>/mem exactly like
+  the Phase-1 tool, driven by the glue — which is a v2 design
+  step, not a patch.
+- **Physical keys**: with a real window (Xvfb :99) and synthetic
+  X11 keys, F5 in a pause wrote a new save ([SAVE] count 0->1,
+  29,119 pages) and F9 restored it (count 3->4), observables
+  exact. (The windowed front buffer itself never updated under
+  llvmpipe — 29 present lines all session — so the visual
+  before/after screenshot pair remains unverified; all state
+  evidence is from guest RAM.)
+- **Audio**: same-session load — music continues (RMS ~0.079
+  sustained 45 s post-load, drive 6). Cross-boot title load —
+  mix is exactly 0.0000 from ~2 s after the load for the rest of
+  the session (drive 4), the leg-5 wedge taking the audio task
+  with it; Phase 1's leg-4 resume kept healthy audio (peaks
+  0.24–0.41). Phase 1's caution stands for any future in-match
+  restore work: reset the host MP3 codec's stream table on
+  restore (streams keyed by workspace pointer; a same-format
+  restart is never detected, notes 040). v1 does not reset it.
+- **Progression**: mission id / mode are *in* the snapshot
+  (restored byte-exact: mission 1, mode 0), so a win in a
+  resumed leg-4 match is scored by the game's own progression
+  code for that mission and persisted by its own savedata
+  write. The direct clear-and-credit check is still open: it
+  needs a played-out win in a restored match, which today only
+  the Phase-1 external leg-4 flow can reach (the in-glue
+  restore blocks resumption — drives 8–11 above). Jerry's
+  manual version, once a resume path is used: enter the level,
+  restore, win it, and confirm the campaign map credits
+  mission N and `NPUB30061-AUTO/SETTINGS.DAT` is rewritten.
+
+### Updated verdict
+
+Phase 2 ships the complete in-glue plumbing — hotkeys, format,
+validation, gates, cache flush, byte-exact restore — and a
+measured map of its limits. As of this writing the only
+demonstrated end-to-end resume is Phase 1's external leg-4
+flow; every in-glue load restores memory faithfully and then
+fails to resume (frozen for in-place/title loads, an orderly
+match teardown for cross-instance loads into a paused match).
+The standing explanation is the missing stop-the-world step,
+with the pad/SPURS/codec resync list from Phase 1 still owed
+behind it. The README on this branch describes the feature
+with exactly that status.
