@@ -362,6 +362,29 @@ at 1000 while Player 1 stayed 550; Player 1's health pin restored
 a poked life while Player 2's stayed down); a Campaign regression
 run (human slot 1 pinned as before, AI untouched).
 
+## #25 — SPU geometry job 00187280: native override (on by default)
+
+The SPURS geometry batch job (guest 0x187280: per-group matrix
+compose, vertex transform + normal normalize, triangle frustum
+culling; kicked and awaited every frame) is replaced at its inner
+call site by a native transcription in the fork
+(runtime/spu/spu_job187280.c, ps3_job187280_compute_native). The
+job issues no GETs — inputs are staged into LS by the runtime and
+its three chunked write-back loops are PUTs — so the override
+computes in LS exactly where the lifted code does. Groups stay
+sequential (shared scratch, loop-carried cursors); element passes
+and the cull test phase parallelise inside a group. Equivalence:
+0 failures across 3,033 harness cases (byte-identical 256 KB LS
+plus live registers, three runs). Patch mechanics:
+recomp/scripts/patch_job_override.py swaps the callee in the
+generated job TU and adds the workspace glue file to the build;
+setup.py applies it in the standard pipeline, so the override is
+**on by default**. PS3_NO_JOB_OVERRIDE=1 (non-empty) restores the
+lifted job — the A/B and debugging switch. Measured: 2.3–3.1x
+faster per call on transform-heavy shapes; in a heavy Battle the
+job vanishes from profile samples (the entity-sim job 00188300
+becomes the wall; see notes 050). Details: notes 050.
+
 ## #26 — Cheats stage 4: the Ship toggle, plus the stockpile aggregate fix
 
 Two changes, both in the host cheats module / lift patch family

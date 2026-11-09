@@ -399,15 +399,21 @@ def setup_vfs(gamedata_layers, out_dir: Path):
 def apply_lift_patches(recomp_dir: Path):
     """Apply source patches to the freshly lifted code (idempotent).
 
-    Currently: the cheats stage-2 patch (guest Cheats submenu in the
-    game's Options menu), implemented by patch_lift_cheats.py beside
-    this file. The patch script is assert-anchored and exits cleanly
-    when the lift is already patched.
+    Currently: the cheats patch (guest Cheats submenu in the game's
+    Options menu; patch_lift_cheats.py) and the SPU job-187280 native
+    override (patch_job_override.py; see notes 050). Both scripts are
+    assert-anchored and exit cleanly when already applied.
     """
     script = Path(__file__).resolve().parent / "patch_lift_cheats.py"
     target = recomp_dir / "recompiled" / "ppu_recomp_000.cpp"
     print("\n--- Applying lift patches ---")
     run_cmd([sys.executable, str(script), str(target)], "patch lifted PPU code")
+    # SETUP JOB OVERRIDE: the geometry job's native override is part
+    # of the default build (PS3_NO_JOB_OVERRIDE=1 opts out at run
+    # time, not build time).
+    override = Path(__file__).resolve().parent / "patch_job_override.py"
+    run_cmd([sys.executable, str(override), str(recomp_dir)],
+            "patch SPU job 187280 override")
 
 
 def main():
