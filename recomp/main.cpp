@@ -926,6 +926,17 @@ int main(int argc, char** argv)
     setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: do not lose prints on a kill */
     setvbuf(stderr, NULL, _IONBF, 0);
 
+    /* G8B8 textures: present the two bytes the other way round. Comet Crash's
+     * ground-shadow stamps (a G8B8 atlas sampled into the 384x384 shadow map)
+     * came out as flat squares with the runtime's default order and as the
+     * intended soft blobs with this one; the default is kept for the other
+     * titles until they are checked. Overridable: PS3RECOMP_G8B8_SWAP=0. */
+#ifdef _WIN32
+    if (!getenv("PS3RECOMP_G8B8_SWAP")) _putenv_s("PS3RECOMP_G8B8_SWAP", "1");
+#else
+    setenv("PS3RECOMP_G8B8_SWAP", "1", 0);
+#endif
+
     printf("=== ps3recomp game runner ===\n");
 
     if (!alloc_guest_vm()) {
