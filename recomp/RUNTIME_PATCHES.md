@@ -303,3 +303,22 @@ exits to the parent menu with its selection preserved, and the
 chain length stays constant. One cosmetic remainder: the rebuilt
 submenu's highlight restarts on the first row. Investigation:
 notes 041 (redraw addendum).
+
+## #32 - SPU direct-call fast path enabled under GCC (PS3_SPU_DIRECT)
+
+The fork's SPU_DIRECT musttail fast path (SPU_DIRECT_TAILCALLS)
+was gated to Clang builds only, so the GCC build compiled it
+out and pumped every direct transfer through the trampoline:
+~378M SPU_DIRECT transfers per match window. The gate in
+runtime/spu/spu_context.h now has a __GNUC__ branch (GCC >= 15
+provides musttail), enabling the fork's own fast path; 98.96%
+of transfers are eligible, the rest fall back to the
+trampoline by design. Measured on SPU job 00188300 with the
+profile harness: -3.8% Battle / -5.2% Campaign worker-span
+cycles per dispatch. Runtime opt-out: PS3_SPU_DIRECT=0 forces
+the trampoline. Fork 0b54109f, on fork master. Jerry's play
+verdict on the test build (build-fastpath): "definitely
+faster" (2026-11-09). Study and gates: notes 052. Numbering:
+entries 21-31 live on the overnight branch and 32/33 name the
+savestate entries on that line; this entry takes 32 on main
+to stay clear of the overnight numbers.
