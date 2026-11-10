@@ -662,6 +662,44 @@ it falls back to the null RSX backend (no RSX_PRESENT lines at all).
 (4) Re-run `cmake` after adding fork source files: the runtime glob has
 no CONFIGURE_DEPENDS.
 
-Next candidate: job 00187F00 (928-byte depth sort of up to 1024
-sprites, now ~23% of samples); a native override verified against the
-lifted job, like the 187280 one.
+Next candidate: job 00187F00 (see #35).
+
+
+## #35 - SPU job 187F00 native override: sprite depth sort (fork perf/spu-mem)
+
+Job 00187F00 (928-byte binary, ~12k runs/s in a Battle) was the top
+sample after #34 (~23%). Its work function (guest func_00000160) is
+three 1024-element phases: depth keys (position x 4x4 matrix, keep lane
+2), a gnome sort of the entries by that float (descending, capped at
+10240 steps so a worst case leaves a partial order), and a gather of the
+32-byte records into sorted order.
+
+runtime/spu/spu_job187f00.c transcribes the three loops using the same
+per-lane fm/fma/fa helpers, computing only the one lane the job keeps.
+It handles the call only when the four buffers are aligned, in LS and
+pairwise disjoint (the game's layout) and returns 0 otherwise, so the
+lifted function runs unchanged. Seam and kill switch follow the 187280 override (notes 050):
+recomp/scripts/patch_job187f00_override.py redirects the call in
+func_00000054 to cc_job187f00_compute() (recomp/job187f00_glue.cpp);
+setup.py runs it after every lift. PS3_NO_JOB_OVERRIDE=1 disables both
+job overrides, PS3_NO_JOB187F00=1 this one alone.
+
+Verification:
+- Harness (~/job187f00-stage, adapted from the 187280 one): 111 cases
+  (random/sorted/worst-case/nearly-sorted/NaN-denorm keys, several
+  placements incl. unaligned matrix, overlap and out-of-LS fallbacks),
+  byte-compare of the full 256 KB LS and live registers, in trampoline
+  and direct-tail-call modes: 0 failures. Six deliberate mutations of
+  the native (cap, compare direction, halfword, gather index, preserved
+  bits, wrong row) are each caught.
+- Live: CC_JOB187F00_VERIFY=1 runs native on the real context and the
+  lifted function on a private copy, compares all LS: 1.36M calls in a
+  driven Battle, 0 mismatches, 0 declined.
+- Per call (harness): 4.2-6.4x faster. Driven 2P Battle, same binary,
+  override on/off only: 93.0 -> 100.8 fps, 4.38 -> 4.01 cores.
+
+Notes: gpr[2..79] differ from the lifted chain after the call; they are
+dead (the only consumer, func_00000054's tail, reassigns gpr[6..9] and
+reads gpr[80..82]). The 187280 override's glue (job187280_glue.cpp) is
+still not tracked in this repo; only the new glue is (recomp/).
+Remaining cost in the override is the exact-emulation float helpers.

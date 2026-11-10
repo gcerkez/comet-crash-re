@@ -414,6 +414,10 @@ def apply_lift_patches(recomp_dir: Path):
     override = Path(__file__).resolve().parent / "patch_job_override.py"
     run_cmd([sys.executable, str(override), str(recomp_dir)],
             "patch SPU job 187280 override")
+    # The sprite depth-sort job (187F00): same default-on, run-time opt-out.
+    override2 = Path(__file__).resolve().parent / "patch_job187f00_override.py"
+    run_cmd([sys.executable, str(override2), str(recomp_dir)],
+            "patch SPU job 187F00 override")
 
 
 def main():
