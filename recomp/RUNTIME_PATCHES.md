@@ -304,7 +304,412 @@ chain length stays constant. One cosmetic remainder: the rebuilt
 submenu's highlight restarts on the first row. Investigation:
 notes 041 (redraw addendum).
 
-## #32 - SPU direct-call fast path enabled under GCC (PS3_SPU_DIRECT)
+## 21. Pad reports at a vblank-like cadence (fork 1c4bd6b2)
+
+pad_poll_backend served a fresh pad report every 4 ms (250 Hz).
+Comet Crash counts fresh reports for its input timing (menu
+auto-repeat), so in states whose loop polls faster than 60 Hz
+the timing ran up to ~4x fast: on the real GPU the pause loop
+polls ~280x/s while front-end states poll slower, which is why
+pause menus overshot options and the front-end menus felt fine.
+The poll gate now defaults to a 16 ms cadence (one fresh report
+per vblank, as on hardware); PAD_POLL_INTERVAL_MS overrides
+(4 restores the old behaviour). Full investigation: notes 046.
+
+## 22. Optional anti-clip mix normalize (fork d7798d41)
+
+The cellAudio mixer summed all ports into a block and hard-clipped
+to [-1, 1], squaring stacked peaks (the leading suspect for sounds
+"overwhelming" when several play at once; notes 047). With
+AUDIO_MIX_NORM=1, a block that would clip is scaled uniformly to
+peak 1.0 instead; sub-full-scale blocks are bit-identical, so solo
+sounds never change. Default off pending a heavy-load verdict.
+
+## 23. Fragment-program walk memoization (fork dc9878b2)
+
+eng_pipeline_get re-walked the fragment program five times per
+draw (texture units, gamma units, expand units, structural hash,
+inline constants) before its pipeline cache lookup -- the FIFO
+thread's top cost in sprite-heavy scenes (live profile: ~380%
+CPU, GPU 5-38%). The five results are pure functions of the
+program bytes (+ the gamma/expand input masks) and are now
+memoized on an FNV content fingerprint: one byte pass replaces
+five decode walks. Failure semantics preserved (malformed
+program and collect failure still return 0; >256-constant
+programs take the direct path). Driven-session counters: 72%
+of 327,680 lookups served from the memo; rendering verified in
+a live match; frame-rate A/B neutral under identical conditions.
+Full investigation: notes 048.
+
+## 24. Cheats stage 3: per-player Battle cheats (repo)
+
+Cheat toggles are per player (notes 049). The Cheats submenu gains
+a "Player: N" selector row (opcode 49; glue bridge
+comet_cheats_get_player / comet_cheats_cycle_player); the four
+toggle rows beneath it show and flip the selected player's state.
+The glue keeps s_cheats[player][toggle] and the tick maps players
+to stat-array slots by the mode word (obj+0x55209C: 2 = Battle,
+Player N -> slot N-1; otherwise Player 1 -> slot 1, the Campaign
+human, and slot 0 is never pinned). Thorium pins the per-slot
+float channel (obj+0x348 + slot*0x80, the authoritative balance);
+the u32 shadow pair keeps following the slot-1 player. Control
+file gains p2_/p3_/p4_ prefixed lines; env gains
+CC_CHEAT_P<N>_<NAME>. Buildables' shared requirement table still
+neutralises globally when any player enables it (the per-seat
+tech-mask bits stay individual). Verified driven: submenu
+cycling/flips from Options; a 2P Battle (Player 2 Thorium pinned
+at 1000 while Player 1 stayed 550; Player 1's health pin restored
+a poked life while Player 2's stayed down); a Campaign regression
+run (human slot 1 pinned as before, AI untouched).
+
+## #25 — SPU geometry job 00187280: native override (on by default)
+
+The SPURS geometry batch job (guest 0x187280: per-group matrix
+compose, vertex transform + normal normalize, triangle frustum
+culling; kicked and awaited every frame) is replaced at its inner
+call site by a native transcription in the fork
+(runtime/spu/spu_job187280.c, ps3_job187280_compute_native). The
+job issues no GETs — inputs are staged into LS by the runtime and
+its three chunked write-back loops are PUTs — so the override
+computes in LS exactly where the lifted code does. Groups stay
+sequential (shared scratch, loop-carried cursors); element passes
+and the cull test phase parallelise inside a group. Equivalence:
+0 failures across 3,033 harness cases (byte-identical 256 KB LS
+plus live registers, three runs). Patch mechanics:
+recomp/scripts/patch_job_override.py swaps the callee in the
+generated job TU and adds the workspace glue file to the build;
+setup.py applies it in the standard pipeline, so the override is
+**on by default**. PS3_NO_JOB_OVERRIDE=1 (non-empty) restores the
+lifted job — the A/B and debugging switch. Measured: 2.3–3.1x
+faster per call on transform-heavy shapes; in a heavy Battle the
+job vanishes from profile samples (the entity-sim job 00188300
+becomes the wall; see notes 050). Details: notes 050.
+
+**Pool tuning (fork 311a45a7).** A bench decomposition of the
+cull-heavy shape (16 groups x 128 elements) showed its groups fell
+below the element-pass pool floor (256 items), so every group's
+transform pass ran serially on the calling thread (~1.5 ms of the
+6.3 ms call). The element-pass threshold is now 128 with one chunk
+per worker, and both pool waits spin briefly before parking (256
+worker / 1000 caller pauses; long spins regress under CPU
+contention - 15 spinning workers starve the caller's serial
+phases). Cull-heavy: 6.32 -> 4.49 ms per call (-29%, medians of 6
+on a contended 16-core host); transform shapes flat to -6%;
+equivalence harness 0/3033 failures, three consecutive runs,
+against the byte-identical TU.
+
+## #26 — Cheats stage 4: the Ship toggle, plus the stockpile aggregate fix
+
+Two changes, both in the host cheats module / lift patch family
+(#14/#15/#20/#24 lineage):
+
+**Ship (invulnerable player ship).** The ship is a type-1 entity in
+the game's double-buffered 256-byte entity banks (bank bases are the
+u32s at obj+0x180 / obj+0x198; the per-player ship record index is
+the u16 at obj+0x36C8 + 2*slot; bank A = 0x10800200, bank B =
+0x13500100 in observed sessions). Health is the float at record
++0x50, max the float at +0x64 (1000.0, stamped at creation by
+FUN_0011c4f8 from the constant at ELF VA 0x1F5A90). All damage,
+healing and death run inside SPU job 00188300: deltas apply as
+health = min(max, health + delta) with no lower clamp; the death
+path triggers on health <= 0 and writes health := 1.0f before the
+record becomes a type-63 tombstone or respawns at 1000.0. Verified
+against all 61 hunt-7 RAM dumps and confirmed live: an external
+poke of 500.0 stuck and then rose at the base-repair rate
+(~+122/s) in both banks. The glue tick, per enabled player, pins
+record +0x50 := record +0x64 in both banks (type byte +0x0F == 1
+checked first; registry index 0 falls back to a scan for the first
+type-1 record so solo play always resolves). Menu: a fifth toggle
+row "Ship: On/Off" under Health, opcode 57, control-file key
+ship= / pN_ship=, env seed CC_CHEAT_SHIP / CC_CHEAT_P<N>_SHIP.
+Which registry slot a second human's ship takes in Battle is
+unobserved; the mapping follows the stat-slot order.
+
+**Stockpile aggregate fix.** The cheat pinned the eight per-type
+stockpiles (stat block +0x64) but not their aggregate twin, the u16
+at block +0x5E, whose invariant is +0x5E == sum of the eight. Every
+cheat-fed send decremented the aggregate from 0, so it underflowed
+(Jerry's sessions reached -572): the HUD sword counter
+(FUN_00146b98: (short)+0x5A + (ushort)+0x5E, clamped to a literal
+1000) saturated at 1000, and the production gate — reading the
+counter unsigned against the 1000 cap — stayed shut after the
+cheat was disabled, soft-locking building. The tick now also pins
+block +0x5E := 8 * stockpile_amount in the same branch (2-byte
+store only; +0x5C/+0x5D are flag bytes). With the cheat on, the
+aggregate always equals the pinned stockpiles; on disable, the
+last tick leaves it equal to the real total and the game's own
+bookkeeping tracks from there.
+
+## #27 - Fixed -6 dB mix headroom (AUDIO_HEADROOM)
+
+The mixer summed guest ports at full scale and hard-clipped the
+result, so stacked sounds slammed into the ceiling. Following
+iopenmohaa-ps3's hardware-validated PS3A_MIX_HEADROOM,
+audio_mix_one_block now scales the finished mix by a master gain
+before the AUDIO_MIX_NORM / clip stage. The gain comes from
+AUDIO_HEADROOM, default 0.5 (-6 dB); 1.0 skips the multiply and
+the mix is bit-exact the old way. Fork d3f0347a. A/B proof on
+paired driven captures: the title-to-menu beep peaked at 0.0757
+(control) vs 0.0379 with headroom - the same event at exactly
+half amplitude.
+
+## #28 - Mixer concealment stack (AUDIO_CONCEAL, default off)
+
+When the guest audio producer falls behind under load, the mixer
+used to play the unwritten ring block as a silent hole - heard as
+chopping and crackle. Ported from whompay/inFAMOUSreborn's
+vendored cellAudio.c (same runtime lineage; their issue #60 is
+the same complaint), adapted to this fork's POSIX mixer and gated
+behind AUDIO_CONCEAL=1 (default OFF pending a heavy-session
+listening verdict): elastic consumption (a bounded wait,
+AUDIO_ELASTIC_US default 6000 us, for a late block from a
+recently-playing port when the device queue has slack); sentinel
+marking of consumed blocks (-0.0f) so unwritten blocks are
+distinguishable from written silence, with stall bounding
+(AUDIO_STALL_MAX) and a self-protection give-up that restores
+plain behaviour if holes persist pathologically; and PLC -
+waveform-matched (WSOLA) repeat concealment of missing blocks
+with crossfades, AUDIO_PLC_MODE default 3. Event counters print
+under AUDIO_RATE=1. AUDIO_STRETCH was deliberately not ported:
+it rides a host-FIFO design that conflicts with this fork's
+deadline pacing + backlog drop/resync (885b5bab). Fork dd777aee.
+Driven verification: machinery live in the stats lines, zero
+false triggers on a quiet menu workload.
+
+## #29 - Denormal flush (DAZ/FTZ) around lifted SPU runs (SPU_FTZ)
+
+The SPU has no denormal numbers; x86 hosts pay a microcode
+assist when lifted SPU arithmetic produces or consumes them,
+and denormal-heavy guest code (the MultiStream synth) made
+audio replies late in Soulbrandt's title. The fork already
+bracketed every lifted run with a float-mode enter/leave pair
+(the arm64 FPCR path); on x86-64 that pair now also saves the
+caller's MXCSR, sets FTZ|DAZ for the run, and restores it at
+the single epilogue (halts included). SPU_FTZ=0 opts out;
+rounding is untouched and SPU_SCALAR_HELPERS builds are
+excluded. Semantics argument: the SPU flushes denormals by
+construction, so lifted results are identical - only the
+host's assist cost changes. Fork b6b7c925. Driven verification:
+boot to frame 1680 at 1920x1080; a menu capture contained
+exactly the two driven beeps.
+
+## #30 - Quadword shift helpers: per-word formulation
+
+spu_shlqbii / spu_rotqbii and their bit-form siblings assembled
+two 64-bit halves, shifted, and disassembled - per call, in
+helpers every lifted SPU job uses constantly. Ported from
+haze-recomp (3e97896): per-word shifts the host can vectorize;
+the bit forms delegate or wrap a shared right-shift core.
+Correctness gate: a standalone old-vs-new sweep - 20,151
+vectors x the full shift ranges = 10,156,104 comparisons, 0
+mismatches - and the committed bodies are token-identical to
+the sweep-tested text. Fork 0691abed.
+
+## #31 - SDL audio buffer 1024 frames (AUDIO_SDL_FRAMES)
+
+The mixer requested a 256-frame SDL buffer (5.3 ms) - on
+PipeWire desktops Soulbrandt measured that buffer running
+short 12-14% of the time under load, and never at 1024. The
+device request is now 1024 frames by default, env
+AUDIO_SDL_FRAMES (clamped 256..4096); our mixer's deadline
+pacing and drop/resync stay in charge of timing. The boot log
+confirms the grant ("SDL device: freq=48000 ch=2
+samples=1024"). Fork d7430289.
+
+## #32 - Save states (experimental, branch muse/savestates)
+
+F5 saves the current match to ~/tools/cc-recomp/saves/slot1.ccsave,
+F9 loads it. Glue module applied by
+recomp/scripts/patch_main_savestate.py; fork a9ec9227 (backend
+hooks + ps3_rsx_flush_guest_caches) and 18ded31d (engine cache
+invalidate). Sparse guest-RAM snapshot: header (magic CCSV0001,
+mission id, mode, state, timestamp) + nonzero 4 KiB pages over
+guest [0, 0x20000000); load validates the whole file before
+touching memory, flushes RSX caches, reconciles and copies pages
+back. Save is pause-only (state 14; state-13 captures tear).
+Restores are byte-exact, same-session and cross-boot - but
+resumption is not yet sound in-glue: in-place and title loads
+leave the sim frozen, cross-instance loads into a paused match
+collapse it, while the external SIGSTOP prototype's leg-4 flow
+(same format) resumes and plays. Full evidence and the
+stop-the-world analysis: notes/051-save-states.md.
+Round 2 (same branch): load gate tightened to pause-only
+(Phase-1 verdict); fork 2ffc2da4 adds
+ps3_pad_resync_savestate (PAD_FILE hold statics hoisted +
+cleared on load, ports marked fresh), 98f63c11 its build
+fix, fda534c8 adds ps3_spu_mp3_reset_streams (codec stream
+table dropped on load). Measured: both resyncs fire on
+every load; pad admissions STILL freeze after an in-place
+restore (the guest stops polling - the wedge is guest
+thread sync, not pad backend state); cross-instance loads
+still collapse the match. The stop-the-world gap vs the
+SIGSTOP prototype stands.
+v2 (round 3): the restore's page copy now runs
+stop-the-world — after total validation and the pad/codec
+resyncs, the glue forks a helper and SIGSTOPs the process;
+the child writes the snapshot through /proc/self/mem with
+raw syscalls only and SIGCONTs the parent on every path
+(failures classified: refused before the stop / nothing
+written, session unharmed / mid-write, session corrupt).
+The RSX guest-cache flush was REMOVED from the load path:
+with it, cross-process loads restored byte-exact but the
+guest never polled the pad again; without it, the leg-4
+in-glue load RESUMES (byte-exact at load, pad admissions
+advance, entity banks evolve; stop 226-240 ms at ~28.8k
+pages). Pad + codec resyncs remain. In-place
+later-timeline loads still wedge (guest thread sync),
+matching the Phase-1 leg-3 result. Evidence:
+notes/051-save-states.md, round 3.
+
+## #33 - Savestate load: FIFO walker hold + resync (branch muse/savestates)
+
+Round 4 of #32 (notes 051). A cross-process load restored the
+match but left the host FIFO walker at the pre-load session's
+position: it drained the restored ring from its stale offset,
+replaying consumed history or parsing payload data as methods
+-- poisoned shader state (fragment programs decompiled from
+the wrong bytes failed HLSL translation; black screen on the
+real GPU) or an unmapped-JUMP FIFO resync, depending on where
+the offset landed. Fork exports in cellGcmSys.c (SAVESTATE
+FIFO RESYNC; recomp/scripts/patch_fork_fifo_resync.py with
+the _scan/_put/_scan2/_scan3 follow-ons):
+ps3_gcm_fifo_savestate_hold() parks the walker across the
+restore; ps3_gcm_fifo_savestate_resync() moves it to the
+restored guest position -- the restored title context's
+current, scanned back to the saved session's last flip marker
+so the drain executes that flip in order -- publishes the
+control put (from the restored guest position) and get
+mirrors, clears the walker's CALL slot and pass state, and
+registers the saved session's last flip as queued-and-reached
+so its completion is delivered exactly once (a flip never
+reached waits forever; pre-fix loads resumed only because the
+stale replay crossed the marker). Glue in
+patch_main_savestate.py: hold with the pad/codec resyncs
+after total validation, resync right after the restore on
+every outcome. Host-private shadow state only; no
+guest-visible cache is invalidated (the #32 v2 lesson).
+Validated headlessly on deterministic Kreios leg-4 drives:
+the load resumes (byte-exact restore, pad admissions advance,
+state evolves) with the post-load fragment-translation
+failure class gone (5 in the same configuration before the
+fix); Jerry's mission-39 save loads with the resync line and
+no FIFO desync. Residual: the first frame after a load can
+still drop a draw whose program address was set before the
+saved session's tail and whose local-memory contents differ
+between sessions (1 in the Kreios validation run; 3 for the
+cross-mission mission-39 load); the picture on the real GPU
+is Jerry's check. Evidence: notes/051-save-states.md, round 4.
+
+
+## #34 - SPU job staging: dirty-page local store (fork branch perf/spu-mem, fe6531c7)
+
+Symptom: heavy Battles are CPU-bound. A perf sample (cpu-clock; the
+host allows no hardware counters or call graphs) of a driven 2P Battle
+on the RX 7900 XTX put 29.4% of all samples in `__memset`/`__memmove`.
+
+Cause: `spu_run_spurs_job` re-staged the whole 256 KB local store for
+every job (full memset, then memcpy of the job binary). With the new
+`SPU_JOBSTAT=<secs>` counter a Battle shows ~230k jobs/s: the 177 KB
+entity job (image 6, 00188300) ~90k/s and the 74 KB 001B4300 (image 8)
+~100k/s, i.e. tens of GB/s of staging traffic. Scanning the store for
+changes instead of memsetting it cost as much (not cache-resident at
+that rate), so the writes are tracked instead.
+
+Fix (runtime/spu/spurs_job.c, spu_context.h): `spu_context.ls_dirty`
+holds one bit per 4 KB page written since the last job. Every guest-
+visible LS write sets it: `spu_ls_write128/32`, MFC GET (and the
+null-DMA memset), the GETLLAR line copy, the two direct writers in
+spu_channels.c, the mp3 codec, and the job runner's own staging of
+inputs, cache buffers, descriptor and kernel-view overlay. The next job
+rewrites only dirty pages, and re-copies its binary only when the EA/
+size changed or `g_spurs_job_bin_epoch` moved (bumped per JOBLIST batch
+in cellSpurs.c and per one-off dispatch in spu_workload.c). The 187280
+native override sets the whole store dirty (its pool workers store
+concurrently).
+
+Semantic note: within one JOBLIST batch a resident job binary is not
+re-read from guest memory (jm2 does the same). A title that rewrote a
+job binary mid-batch would differ; `SPURS_JOB_FULLCOPY=1` restores the
+old full memset+memcpy.
+
+Verification:
+- `SPURS_JOB_VERIFY=1` compares every job's staged store with guest
+  memory: 25.9M jobs over boot, menus and a live Battle, 0 bad pages.
+- Standalone tests: 200k random job sequences (same/different binary,
+  random marked stores, binary rewrites between batches, full-store
+  claims) and 20k clear cases, 0 failures.
+- Same binary, driven 2P Battle (mission 101), windowless on the real
+  GPU, only the env var differing: 75.4 -> 92.7 fps, 5.24 -> 4.43
+  cores, memset+memmove 29.4% -> 11.7% of samples.
+
+Also in the fork on this branch: #16 items 1-2 (PUT reservation span
+test, per-DMA diagnostic gate; no measurable frame-rate change alone)
+and SPU_DIRECT musttail under GCC. The AVX2 build option (#16 item 3)
+now compiles and runs but showed no gain over build-fastpath (~78 fps
+vs ~77 in the driven Battle).
+
+Not verified: Jerry's real heavy sprite session. The driven Battle
+never reaches the unplayable regime (75-95 fps), so this is a
+measured CPU reduction, not yet a confirmed fix for that scene.
+
+Measurement notes (cost a lot of time): (1) A windowed run on Xvfb
+silently picks llvmpipe (device 1) and is meaningless; run with
+PS3RECOMP_VK_WINDOW=0 and check the "using device" log line says the
+RADV GPU. (2) Windowless the menus run fast enough that an 8-report
+d-pad hold auto-repeats past the target; tap with a count of 2.
+(3) build-spuperf must be configured with -DPS3RECOMP_RSX_VULKAN=ON or
+it falls back to the null RSX backend (no RSX_PRESENT lines at all).
+(4) Re-run `cmake` after adding fork source files: the runtime glob has
+no CONFIGURE_DEPENDS.
+
+Next candidate: job 00187F00 (see #35).
+
+
+## #35 - SPU job 187F00 native override: sprite depth sort (fork perf/spu-mem)
+
+Job 00187F00 (928-byte binary, ~12k runs/s in a Battle) was the top
+sample after #34 (~23%). Its work function (guest func_00000160) is
+three 1024-element phases: depth keys (position x 4x4 matrix, keep lane
+2), a gnome sort of the entries by that float (descending, capped at
+10240 steps so a worst case leaves a partial order), and a gather of the
+32-byte records into sorted order.
+
+runtime/spu/spu_job187f00.c transcribes the three loops using the same
+per-lane fm/fma/fa helpers, computing only the one lane the job keeps.
+It handles the call only when the four buffers are aligned, in LS and
+pairwise disjoint (the game's layout) and returns 0 otherwise, so the
+lifted function runs unchanged. Seam and kill switch follow the 187280 override (notes 050):
+recomp/scripts/patch_job187f00_override.py redirects the call in
+func_00000054 to cc_job187f00_compute() (recomp/job187f00_glue.cpp);
+setup.py runs it after every lift. PS3_NO_JOB_OVERRIDE=1 disables both
+job overrides, PS3_NO_JOB187F00=1 this one alone.
+
+Verification:
+- Harness (recomp/perf/harness187f00, adapted from the 187280 one): 111 cases
+  (random/sorted/worst-case/nearly-sorted/NaN-denorm keys, several
+  placements incl. unaligned matrix, overlap and out-of-LS fallbacks),
+  byte-compare of the full 256 KB LS and live registers, in trampoline
+  and direct-tail-call modes: 0 failures. Six deliberate mutations of
+  the native (cap, compare direction, halfword, gather index, preserved
+  bits, wrong row) are each caught.
+- Live: CC_JOB187F00_VERIFY=1 runs native on the real context and the
+  lifted function on a private copy, compares all LS: 1.36M calls in a
+  driven Battle, 0 mismatches, 0 declined.
+- Per call (harness): 4.2-6.4x faster. Driven 2P Battle, same binary,
+  override on/off only: 93.0 -> 100.8 fps, 4.38 -> 4.01 cores.
+
+Notes: gpr[2..79] differ from the lifted chain after the call; they are
+dead (the only consumer, func_00000054's tail, reassigns gpr[6..9] and
+reads gpr[80..82]). The 187280 override's glue (job187280_glue.cpp) is
+still not tracked in this repo; only the new glue is (recomp/).
+Remaining cost in the override is the exact-emulation float helpers.
+
+Full write-up for #34 and #35 (method, rejected first attempt,
+measurement traps, verification): notes/053-spu-perf.md. Drive and
+harness tooling: recomp/perf/.
+
+
+## #36 - SPU direct-call fast path enabled under GCC (PS3_SPU_DIRECT)
 
 The fork's SPU_DIRECT musttail fast path (SPU_DIRECT_TAILCALLS)
 was gated to Clang builds only, so the GCC build compiled it
@@ -318,7 +723,7 @@ profile harness: -3.8% Battle / -5.2% Campaign worker-span
 cycles per dispatch. Runtime opt-out: PS3_SPU_DIRECT=0 forces
 the trampoline. Fork 0b54109f, on fork master. Jerry's play
 verdict on the test build (build-fastpath): "definitely
-faster" (2026-11-09). Study and gates: notes 052. Numbering:
-entries 21-31 live on the overnight branch and 32/33 name the
-savestate entries on that line; this entry takes 32 on main
-to stay clear of the overnight numbers.
+faster" (2026-11-09). Study and gates:
+notes/052-call-path-fast-path.md. Numbering: this entry was #32
+on main while the overnight/savestate line used 21-35; it is #36
+since those lines merged into main (2026-11-10).
