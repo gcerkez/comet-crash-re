@@ -685,7 +685,7 @@ setup.py runs it after every lift. PS3_NO_JOB_OVERRIDE=1 disables both
 job overrides, PS3_NO_JOB187F00=1 this one alone.
 
 Verification:
-- Harness (~/job187f00-stage, adapted from the 187280 one): 111 cases
+- Harness (recomp/perf/harness187f00, adapted from the 187280 one): 111 cases
   (random/sorted/worst-case/nearly-sorted/NaN-denorm keys, several
   placements incl. unaligned matrix, overlap and out-of-LS fallbacks),
   byte-compare of the full 256 KB LS and live registers, in trampoline
@@ -703,3 +703,7 @@ dead (the only consumer, func_00000054's tail, reassigns gpr[6..9] and
 reads gpr[80..82]). The 187280 override's glue (job187280_glue.cpp) is
 still not tracked in this repo; only the new glue is (recomp/).
 Remaining cost in the override is the exact-emulation float helpers.
+
+Full write-up for #34 and #35 (method, rejected first attempt,
+measurement traps, verification): notes/052-spu-perf.md. Drive and
+harness tooling: recomp/perf/.

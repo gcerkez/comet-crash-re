@@ -45,7 +45,7 @@ The findings it produced are written up, in our own words, in [notes/](notes/).
 | [third_party/ps3recomp](third_party/) | Submodule: our fork of [ps3recomp](https://github.com/sp00nznet/ps3recomp) (MIT). Upstream runtime plus this project's patches (catalogued in [recomp/RUNTIME_PATCHES.md](recomp/RUNTIME_PATCHES.md)): the native MP3 codec, the native SPU geometry-job override, fragment-program memoisation, AA-blit fixes, 1080p present sizing, right-stick range boost, pad cadence fix, quit confirmation, pad-file tooling, log discipline. |
 | [native/](native/) | A hand-written C++17 + SDL3 port, built from the reconstruction notes (menus, input, level parser, playable arena core, the game's own SFX via minimp3). Independent of the recompilation. |
 | [scripts/](scripts/) | Ghidra export/analysis scripts and data extractors (language tables, `.pak` archives) — the tools that produce local analysis artifacts from your dump. |
-| [notes/](notes/) | The engineering log: provenance, subsystem findings, format documentation, and the per-fix records (035–050 cover the recompilation bring-up and beyond: rendering, input, DLC, audio, the cheats menu, and the performance work). |
+| [notes/](notes/) | The engineering log: provenance, subsystem findings, format documentation, and the per-fix records (035–052 cover the recompilation bring-up and beyond: rendering, input, DLC, audio, the cheats menu, and the performance work). |
 
 ## Quick start (the recompilation)
 
