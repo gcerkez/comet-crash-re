@@ -599,3 +599,69 @@ saved session's tail and whose local-memory contents differ
 between sessions (1 in the Kreios validation run; 3 for the
 cross-mission mission-39 load); the picture on the real GPU
 is Jerry's check. Evidence: notes/051-save-states.md, round 4.
+
+
+## #34 - SPU job staging: dirty-page local store (fork branch perf/spu-mem, fe6531c7)
+
+Symptom: heavy Battles are CPU-bound. A perf sample (cpu-clock; the
+host allows no hardware counters or call graphs) of a driven 2P Battle
+on the RX 7900 XTX put 29.4% of all samples in `__memset`/`__memmove`.
+
+Cause: `spu_run_spurs_job` re-staged the whole 256 KB local store for
+every job (full memset, then memcpy of the job binary). With the new
+`SPU_JOBSTAT=<secs>` counter a Battle shows ~230k jobs/s: the 177 KB
+entity job (image 6, 00188300) ~90k/s and the 74 KB 001B4300 (image 8)
+~100k/s, i.e. tens of GB/s of staging traffic. Scanning the store for
+changes instead of memsetting it cost as much (not cache-resident at
+that rate), so the writes are tracked instead.
+
+Fix (runtime/spu/spurs_job.c, spu_context.h): `spu_context.ls_dirty`
+holds one bit per 4 KB page written since the last job. Every guest-
+visible LS write sets it: `spu_ls_write128/32`, MFC GET (and the
+null-DMA memset), the GETLLAR line copy, the two direct writers in
+spu_channels.c, the mp3 codec, and the job runner's own staging of
+inputs, cache buffers, descriptor and kernel-view overlay. The next job
+rewrites only dirty pages, and re-copies its binary only when the EA/
+size changed or `g_spurs_job_bin_epoch` moved (bumped per JOBLIST batch
+in cellSpurs.c and per one-off dispatch in spu_workload.c). The 187280
+native override sets the whole store dirty (its pool workers store
+concurrently).
+
+Semantic note: within one JOBLIST batch a resident job binary is not
+re-read from guest memory (jm2 does the same). A title that rewrote a
+job binary mid-batch would differ; `SPURS_JOB_FULLCOPY=1` restores the
+old full memset+memcpy.
+
+Verification:
+- `SPURS_JOB_VERIFY=1` compares every job's staged store with guest
+  memory: 25.9M jobs over boot, menus and a live Battle, 0 bad pages.
+- Standalone tests: 200k random job sequences (same/different binary,
+  random marked stores, binary rewrites between batches, full-store
+  claims) and 20k clear cases, 0 failures.
+- Same binary, driven 2P Battle (mission 101), windowless on the real
+  GPU, only the env var differing: 75.4 -> 92.7 fps, 5.24 -> 4.43
+  cores, memset+memmove 29.4% -> 11.7% of samples.
+
+Also in the fork on this branch: #16 items 1-2 (PUT reservation span
+test, per-DMA diagnostic gate; no measurable frame-rate change alone)
+and SPU_DIRECT musttail under GCC. The AVX2 build option (#16 item 3)
+now compiles and runs but showed no gain over build-fastpath (~78 fps
+vs ~77 in the driven Battle).
+
+Not verified: Jerry's real heavy sprite session. The driven Battle
+never reaches the unplayable regime (75-95 fps), so this is a
+measured CPU reduction, not yet a confirmed fix for that scene.
+
+Measurement notes (cost a lot of time): (1) A windowed run on Xvfb
+silently picks llvmpipe (device 1) and is meaningless; run with
+PS3RECOMP_VK_WINDOW=0 and check the "using device" log line says the
+RADV GPU. (2) Windowless the menus run fast enough that an 8-report
+d-pad hold auto-repeats past the target; tap with a count of 2.
+(3) build-spuperf must be configured with -DPS3RECOMP_RSX_VULKAN=ON or
+it falls back to the null RSX backend (no RSX_PRESENT lines at all).
+(4) Re-run `cmake` after adding fork source files: the runtime glob has
+no CONFIGURE_DEPENDS.
+
+Next candidate: job 00187F00 (928-byte depth sort of up to 1024
+sprites, now ~23% of samples); a native override verified against the
+lifted job, like the 187280 one.
