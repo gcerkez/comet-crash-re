@@ -1,9 +1,21 @@
 #!/bin/bash
 # Comet Crash (NPUB30061) - Static Recompilation Launcher
+#
+# Runs build/CometCrashRecomp (from ./setup.sh) with the current defaults:
+# Vulkan guest programs + draw batching, 1080p, and everything the build
+# carries -- SPU job staging and the depth-sort override, ground-shadow
+# point sprites, the G8B8 shadow-atlas byte order (main.cpp sets it).
+#
+# Switches (optional, in front of ./run.sh):
+#   RSX_PRIM_STATS=1          log fps + draws per primitive type once a second
+#   PS3RECOMP_ENG_POINTS=0    draw points the old way (1 px, no sprites)
+#   PS3RECOMP_G8B8_SWAP=0     the runtime's old G8B8 byte order
+#   PS3_NO_JOB_OVERRIDE=1     run the lifted SPU geometry job instead of the override
+#   CC_BUILD=<dir>            run another build directory (default: build)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN="$SCRIPT_DIR/build/CometCrashRecomp"
+BIN="$SCRIPT_DIR/${CC_BUILD:-build}/CometCrashRecomp"
 
 if [ ! -f "$BIN" ]; then
     echo "[!] Executable not found at $BIN."

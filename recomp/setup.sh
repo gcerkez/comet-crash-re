@@ -92,7 +92,12 @@ PYEOF
 fi
 
 echo "[*] Configuring (Ninja, RelWithDebInfo)..."
-cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/build" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPS3RECOMP_DIR="$REPO_ROOT/third_party/ps3recomp"
+# AVX2 SPU helpers (CC_HOST_AVX2) when this CPU has AVX2: faster SPU jobs.
+# Override with CC_HOST_AVX2=OFF ./setup.sh ... for a binary that runs anywhere.
+AVX2_DEFAULT=OFF
+grep -qw avx2 /proc/cpuinfo 2>/dev/null && AVX2_DEFAULT=ON
+cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/build" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DPS3RECOMP_DIR="$REPO_ROOT/third_party/ps3recomp" -DCC_HOST_AVX2="${CC_HOST_AVX2:-$AVX2_DEFAULT}"
 
 echo "[*] Building CometCrashRecomp..."
 cmake --build "$SCRIPT_DIR/build" -j"$(nproc)"

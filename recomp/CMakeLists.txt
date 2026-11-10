@@ -175,6 +175,8 @@ endif()
 add_executable(${PROJECT_NAME}
     main.cpp
     stubs.cpp
+    job187f00_glue.cpp
+    job187280_glue.cpp
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
@@ -189,12 +191,30 @@ add_executable(${PROJECT_NAME}
 #   -O2                 -- the target-wide -O1 exists for the huge PPU TUs; the
 #                          SPU sources are small and decode-hot, so they get
 #                          full optimization. The last -O on the line wins.
+#
+# CC_HOST_AVX2 (opt-in): the runtime's SPU helpers carry AVX2 forms of the
+# single-precision ops (fm/fa/fma family, frest/frsqest/fi, cuflt/csflt) and the
+# variable word shifts/rotates, validated lane-exact against the scalar
+# reference (spu_helpers.h). The default -msse4.1 build compiles them out, so
+# the entity/geometry jobs take the two-f64x2-halves and per-lane LUT paths.
+# This adds -mavx2 to the SPU lifts and the runtime only -- NOT the PPU TUs,
+# whose rebuild is the slow one. -mavx2 alone has no FMA instruction, and
+# -ffp-contract=off keeps it that way if someone later adds -mfma/-march=native:
+# SPU fm-then-fa must stay two roundings. The binary then needs an AVX2 CPU
+# (Haswell / Zen 1 or newer).
+option(CC_HOST_AVX2 "Build SPU lifts and the runtime with -mavx2 (AVX2 CPU required)" OFF)
+set(CC_SPU_COMPILE_OPTIONS "-O2")
+if(CC_HOST_AVX2 AND NOT MSVC)
+    list(APPEND CC_SPU_COMPILE_OPTIONS "-mavx2" "-ffp-contract=off")
+    target_compile_options(ps3recomp_runtime PRIVATE -mavx2 -ffp-contract=off)
+    message(STATUS "CC_HOST_AVX2: SPU lifts + runtime built with -mavx2")
+endif()
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
     if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2")
+        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "${CC_SPU_COMPILE_OPTIONS}")
     endif()
 endif()
 
