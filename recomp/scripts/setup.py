@@ -418,6 +418,11 @@ def apply_lift_patches(recomp_dir: Path):
     override2 = Path(__file__).resolve().parent / "patch_job187f00_override.py"
     run_cmd([sys.executable, str(override2), str(recomp_dir)],
             "patch SPU job 187F00 override")
+    # The combat job's (188300) target-scan loop: generated from the lift
+    # into the workspace (nothing game-derived in this repo); notes/056.
+    override3 = Path(__file__).resolve().parent / "patch_job188300_scan.py"
+    run_cmd([sys.executable, str(override3), str(recomp_dir)],
+            "generate SPU job 188300 scan loop")
 
 
 def main():
