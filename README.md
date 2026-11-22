@@ -85,14 +85,18 @@ ctest --test-dir build
 
 ## Status
 
-- **Recompilation: playable.** Real menus, campaign and battle
+- **Recompilation: playable & high-performance.** Real menus, campaign and battle
   modes, construction, unit auto-send, upgrades, the expansion
   content gate, music and SFX (host codec), 1080p, and a built-in
   Cheats menu (Options and pause; per-player in Battle) that the
-  shipped game never had. Performance is an ongoing focus: the
-  per-frame geometry job runs as a verified native override by
-  default. PlayStation Network features are intentionally stubbed
-  (the original's "Not connected" path).
+  shipped game never had.
+  - **GPU Compute Offload**: RSX vertex attribute decode, index expansion,
+    texture decode, and depth/color framebuffer resolves are offloaded to Vulkan
+    compute shaders.
+  - **SPU Acceleration**: Verified native overrides for the geometry job
+    (187280), sprite depth sort (187F00), and combat target scan (188300),
+    along with lane-exact AVX2 float flush helpers eliminating software fallbacks.
+  - PlayStation Network features are intentionally stubbed (the original's "Not connected" path).
 - **Native port: partial.** Menus, input (keyboard/mouse +
   hot-plug gamepads), level parsing, textured 3D arena scene, and
   a playable gameplay core; some per-weapon rules and the exact

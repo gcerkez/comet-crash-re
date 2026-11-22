@@ -89,6 +89,17 @@ def main() -> int:
         assert l.startswith("ctx->gpr[") and l.endswith(";") and "SPU_DIRECT" not in l and "if " not in l, \
             f"unexpected statement in the scan loop: {l}"
 
+    # Invariant statements in body (0x6AA0) that depend only on outer constants
+    invariants = [
+        "ctx->gpr[63] = spu_fs(ctx->gpr[25], ctx->gpr[22]);",
+        "ctx->gpr[64] = spu_ls_read128(ctx, 0x259A0);",
+        "ctx->gpr[60] = spu_il(0);",
+        "ctx->gpr[58] = spu_shufb(ctx->gpr[63], ctx->gpr[64], ctx->gpr[21]);",
+        "ctx->gpr[57] = spu_fs(ctx->gpr[24], ctx->gpr[22]);",
+        "ctx->gpr[46] = spu_shufb(ctx->gpr[57], ctx->gpr[58], ctx->gpr[19]);",
+    ]
+    loop_body_stmts = [l for l in body_stmts if l not in invariants]
+
     used, written = regs(body_stmts + ctl_stmts + tail_stmts + [t_loop, t_69a0])
     rs = sorted(used)
     ind = "        "
@@ -114,16 +125,31 @@ def main() -> int:
     gen.append("}")
     gen.append("")
     gen.append("/* 1: continue at 0x69A0; 2: continue at 0x6BF8. Reads LS, writes only G. */")
-    gen.append("static int scan_core(spu_context* ctx, u128* G)")
+    gen.append("static int scan_core(spu_context* ctx, u128* G, int is_verify)")
     gen.append("{")
     for n in rs:
         gen.append(f"    u128 r{n} = G[{n}];")
+    gen.append("")
+    gen.append("    int first_iter = 1;")
+    gen.append("")
     gen.append("    for (;;) {")
     gen.append(f"{ind}/* 0x6B88 */")
     gen += [ind + localize(l) for l in ctl_stmts]
     gen.append(f"{ind}if (r69._u32[0] != 0) break;")
+    gen.append("")
+    gen.append(f"{ind}if (first_iter) {{")
+    gen.append(f"{ind}    first_iter = 0;")
+    gen += [f"{ind}    " + localize(l) for l in invariants]
+    gen.append(f"{ind}}}")
     gen.append(f"{ind}/* 0x6AA0 */")
-    gen += [ind + localize(l) for l in body_stmts]
+    for l in loop_body_stmts:
+        gen.append(ind + localize(l))
+        if l == "ctx->gpr[71] = spu_and(ctx->gpr[5], ctx->gpr[42]);":
+            gen.append("")
+            gen.append(f"{ind}if (!is_verify && r71._u32[0] == 0) {{")
+            gen.append(f"{ind}    continue;")
+            gen.append(f"{ind}}}")
+            gen.append("")
     gen.append("    }")
     gen.append("    /* pass tail */")
     gen += ["    " + localize(l) for l in tail_stmts]
@@ -144,11 +170,11 @@ def main() -> int:
     gen.append("    if (verify_on < 0) { const char *v = getenv(\"CC_JOB188300_VERIFY\"); verify_on = v && atoi(v) == 1; }")
     gen.append("    if (verify_on) {")
     gen.append("        memcpy(vs.G, ctx->gpr, sizeof vs.G);")
-    gen.append("        vs.ret = scan_core(ctx, vs.G);")
+    gen.append("        vs.ret = scan_core(ctx, vs.G, 1);")
     gen.append("        vs.pending = 1;")
     gen.append("        return 0;")
     gen.append("    }")
-    gen.append("    return scan_core(ctx, ctx->gpr);")
+    gen.append("    return scan_core(ctx, ctx->gpr, 0);")
     gen.append("}")
     gen.append("")
     gen.append("/* At the top of 0x69A0 (where=1) and 0x6BF8 (where=2): compare a pending check. */")
@@ -201,6 +227,8 @@ def main() -> int:
         assert cm.count(anchor) == 1, "cmake anchor"
         new_cm = cm.replace(anchor, anchor + "    job188300_scan.c\n", 1)
         print(f"{cmake}: generated TU added")
+    if "set_source_files_properties(${SPU_SOURCES} job188300_scan.c" not in new_cm:
+        new_cm = new_cm.replace("set_source_files_properties(${SPU_SOURCES}", "set_source_files_properties(${SPU_SOURCES} job188300_scan.c")
 
     if not out_c.exists() or out_c.read_text() != new_c:
         out_c.write_text(new_c)

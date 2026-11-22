@@ -175,6 +175,7 @@ endif()
 add_executable(${PROJECT_NAME}
     main.cpp
     stubs.cpp
+    job188300_scan.c
     job187f00_glue.cpp
     job187280_glue.cpp
     ${PS3RECOMP_SCAFFOLD}
@@ -210,11 +211,11 @@ if(CC_HOST_AVX2 AND NOT MSVC)
     message(STATUS "CC_HOST_AVX2: SPU lifts + runtime built with -mavx2")
 endif()
 if(SPU_SOURCES)
-    set_source_files_properties(${SPU_SOURCES} PROPERTIES
+    set_source_files_properties(${SPU_SOURCES} job188300_scan.c job187f00_glue.cpp job187280_glue.cpp PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
     if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "${CC_SPU_COMPILE_OPTIONS}")
+        set_source_files_properties(${SPU_SOURCES} job188300_scan.c job187f00_glue.cpp job187280_glue.cpp PROPERTIES COMPILE_OPTIONS "${CC_SPU_COMPILE_OPTIONS}")
     endif()
 endif()
 
